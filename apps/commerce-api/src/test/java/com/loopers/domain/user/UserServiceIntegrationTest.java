@@ -7,6 +7,7 @@ import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mockito;
@@ -78,6 +79,46 @@ public class UserServiceIntegrationTest {
 
             // assert
             assertThat(result.getErrorType()).isEqualTo(ErrorType.CONFLICT);
+        }
+    }
+
+    @DisplayName("회원 조회에 관한 통합 테스트")
+    @Nested
+    class UserInfo {
+        @DisplayName("해당 ID 의 회원이 존재할 경우, 회원 정보가 반환된다.")
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void returnsUser_whenUserExists(Gender gender) {
+            // arrange
+            String userId = UserTestFixture.ValidUser.USER_ID;
+            String email = UserTestFixture.ValidUser.EMAIL;
+            String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
+            userService.signUp(userId, email, birthDate, gender);
+
+            // act
+            User found = userService.findByUserId(userId);
+
+            // assert
+            assertAll(
+                () -> assertThat(found).isNotNull(),
+                () -> assertThat(found.getUserId()).isEqualTo(userId),
+                () -> assertThat(found.getEmail()).isEqualTo(email),
+                () -> assertThat(found.getBirthDate()).isEqualTo(birthDate),
+                () -> assertThat(found.getGender()).isEqualTo(gender)
+            );
+        }
+
+        @DisplayName("해당 ID 의 회원이 존재하지 않을 경우, null 이 반환된다.")
+        @Test
+        void returnsNull_whenUserDoesNotExist() {
+            // arrange
+            String userId = "unknown";
+
+            // act
+            User found = userService.findByUserId(userId);
+
+            // assert
+            assertThat(found).isNull();
         }
     }
 }
