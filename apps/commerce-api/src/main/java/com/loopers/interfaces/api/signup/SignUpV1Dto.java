@@ -12,13 +12,13 @@ public class SignUpV1Dto {
     ) {}
 
     public record SignupResponse(Long id, String userId, String email, String birthDate, String gender) {
-        public static SignupResponse from(SignUpInfo info, String gender) {
+        public static SignupResponse from(SignUpInfo info) {
             return new SignupResponse(
                 info.id(),
                 info.userId(),
                 info.email(),
                 info.birthDate().toString(),
-                gender
+                info.gender() != null ? info.gender().name() : null
             );
         }
     }

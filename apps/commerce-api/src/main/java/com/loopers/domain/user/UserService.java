@@ -13,8 +13,8 @@ public class UserService {
     private final UserRepository userRepository;
 
     @Transactional
-    public User signUp(String userId, String email, String birthDateStr) {
-        User user = User.of(userId, email, birthDateStr);
+    public User signUp(String userId, String email, String birthDateStr, Gender gender) {
+        User user = User.of(userId, email, birthDateStr, gender);
         try {
             return userRepository.save(user);
         } catch (DataIntegrityViolationException e) {

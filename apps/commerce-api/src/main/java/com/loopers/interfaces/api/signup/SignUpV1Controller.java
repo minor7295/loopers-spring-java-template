@@ -1,7 +1,10 @@
 package com.loopers.interfaces.api.signup;
 
 import com.loopers.application.signup.SignUpInfo;
+import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.User;
+import com.loopers.support.error.CoreException;
+import com.loopers.support.error.ErrorType;
 import com.loopers.domain.user.UserService;
 import com.loopers.interfaces.api.ApiResponse;
 import jakarta.validation.Valid;
@@ -22,9 +25,16 @@ public class SignUpV1Controller {
     public ApiResponse<SignUpV1Dto.SignupResponse> signUp(
         @Valid @RequestBody SignUpV1Dto.SignUpRequest request
     ) {
-        User user = userService.signUp(request.userId(), request.email(), request.birthDate());
+        Gender gender;
+        try {
+            gender = Gender.valueOf(request.gender());
+        } catch (IllegalArgumentException e) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "gender 값이 올바르지 않습니다.");
+        }
+
+        User user = userService.signUp(request.userId(), request.email(), request.birthDate(), gender);
         SignUpInfo info = SignUpInfo.from(user);
-        SignUpV1Dto.SignupResponse response = SignUpV1Dto.SignupResponse.from(info, request.gender());
+        SignUpV1Dto.SignupResponse response = SignUpV1Dto.SignupResponse.from(info);
         return ApiResponse.success(response);
     }
 }

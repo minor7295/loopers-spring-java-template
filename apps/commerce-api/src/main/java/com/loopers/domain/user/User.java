@@ -6,6 +6,8 @@ import com.loopers.support.error.ErrorType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import lombok.Getter;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -26,6 +28,9 @@ public class User extends BaseEntity {
     private String email;
 
     private LocalDate birthDate;
+
+    @Enumerated(EnumType.STRING)
+    private Gender gender;
 
     private static final Pattern USER_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9]{1,10}$");
 
@@ -62,7 +67,7 @@ public class User extends BaseEntity {
         }
     }
 
-    public User (String userId, String email, String birthDateStr) {
+    public User (String userId, String email, String birthDateStr, Gender gender) {
         validateUserId(userId);
         validateEmail(email);
         validateBirthDate(birthDateStr);
@@ -70,10 +75,11 @@ public class User extends BaseEntity {
         this.userId = userId;
         this.email = email;
         this.birthDate = LocalDate.parse(birthDateStr);
+        this.gender = gender;
     }
 
-    public static User of(String userId, String email, String birthDate) {
-        return new User(userId, email, birthDate);
+    public static User of(String userId, String email, String birthDate, Gender gender) {
+        return new User(userId, email, birthDate, gender);
     }
 
 }
