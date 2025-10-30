@@ -21,4 +21,8 @@ public class UserService {
             throw new CoreException(ErrorType.CONFLICT, "이미 가입된 ID입니다: " + userId);
         }
     }
+
+    public User findByUserId(String userId) {
+        return userRepository.findByUserId(userId);
+    }
 }
