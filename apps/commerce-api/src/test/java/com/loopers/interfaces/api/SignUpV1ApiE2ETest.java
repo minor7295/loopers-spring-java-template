@@ -1,6 +1,7 @@
 package com.loopers.interfaces.api;
 
 import com.loopers.infrastructure.user.UserJpaRepository;
+import com.loopers.domain.user.Gender;
 import com.loopers.interfaces.api.signup.SignUpV1Dto;
 import com.loopers.domain.user.UserTestFixture;
 import com.loopers.utils.DatabaseCleanUp;
@@ -8,6 +9,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -51,14 +54,15 @@ public class SignUpV1ApiE2ETest {
     @Nested
     class SignUp {
         @DisplayName("회원 가입이 성공할 경우, 생성된 유저 정보를 응답으로 반환한다.")
-        @Test
-        void returnsUserInfo_whenSignUpSucceeds() {
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void returnsUserInfo_whenSignUpSucceeds(Gender gender) {
             // arrange
             SignUpV1Dto.SignUpRequest requestBody = new SignUpV1Dto.SignUpRequest(
                 UserTestFixture.ValidUser.USER_ID,
                 UserTestFixture.ValidUser.EMAIL,
                 UserTestFixture.ValidUser.BIRTH_DATE,
-                "MALE"
+                gender.name()
             );
 
             HttpHeaders headers = new HttpHeaders();

@@ -7,8 +7,9 @@ import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentMatchers;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -40,15 +41,17 @@ public class UserServiceIntegrationTest {
     @Nested
     class SignUp {
         @DisplayName("회원가입시 User 저장이 수행된다.")
-        @Test
-        void returnsExampleInfo_whenValidIdIsProvided() {
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void returnsExampleInfo_whenValidIdIsProvided(Gender gender) {
             // arrange
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
+            Mockito.reset(userJpaRepository);
 
             // act
-            User user = userService.signUp(userId, email, birthDate);
+            User user = userService.signUp(userId, email, birthDate, gender);
 
             // assert
             assertAll(
@@ -59,17 +62,18 @@ public class UserServiceIntegrationTest {
         }
 
         @DisplayName("이미 가입된 ID로 회원가입 시도 시, 실패한다.")
-        @Test
-        void fails_whenDuplicateUserIdExists() {
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void fails_whenDuplicateUserIdExists(Gender gender) {
             // arrange
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            userService.signUp(userId, email, birthDate);
+            userService.signUp(userId, email, birthDate, gender);
 
             // act
             CoreException result = assertThrows(CoreException.class, () ->
-                userService.signUp(userId, email, birthDate)
+                userService.signUp(userId, email, birthDate, gender)
             );
 
             // assert
