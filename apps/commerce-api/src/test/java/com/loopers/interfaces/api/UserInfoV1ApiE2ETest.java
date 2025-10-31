@@ -1,7 +1,7 @@
 package com.loopers.interfaces.api;
 
+import com.loopers.application.signup.SignUpFacade;
 import com.loopers.domain.user.Gender;
-import com.loopers.domain.user.UserService;
 import com.loopers.domain.user.UserTestFixture;
 import com.loopers.interfaces.api.userinfo.UserInfoV1Dto;
 import com.loopers.utils.DatabaseCleanUp;
@@ -31,17 +31,17 @@ public class UserInfoV1ApiE2ETest {
     private static final String ENDPOINT_ME = "/api/v1/me";
 
     private final TestRestTemplate testRestTemplate;
-    private final UserService userService;
+    private final SignUpFacade signUpFacade;
     private final DatabaseCleanUp databaseCleanUp;
 
     @Autowired
     public UserInfoV1ApiE2ETest(
         TestRestTemplate testRestTemplate,
-        UserService userService,
+        SignUpFacade signUpFacade,
         DatabaseCleanUp databaseCleanUp
     ) {
         this.testRestTemplate = testRestTemplate;
-        this.userService = userService;
+        this.signUpFacade = signUpFacade;
         this.databaseCleanUp = databaseCleanUp;
     }
 
@@ -61,7 +61,7 @@ public class UserInfoV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            userService.signUp(userId, email, birthDate, gender);
+            signUpFacade.signUp(userId, email, birthDate, gender);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
