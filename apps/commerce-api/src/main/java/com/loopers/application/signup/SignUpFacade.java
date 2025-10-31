@@ -13,9 +13,12 @@ import org.springframework.stereotype.Component;
 public class SignUpFacade {
     private final UserService userService;
 
+    private final PointService pointService;
+
     @Transactional
     public SignUpInfo signUp(String userId, String email, String birthDateStr, Gender gender) {
         User user = userService.create(userId, email, birthDateStr, gender);
+        pointService.create(user, 0L);
         return SignUpInfo.from(user);
     }
 }
