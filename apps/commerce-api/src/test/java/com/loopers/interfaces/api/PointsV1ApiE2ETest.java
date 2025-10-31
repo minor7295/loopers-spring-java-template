@@ -131,5 +131,72 @@ public class PointsV1ApiE2ETest {
             );
         }
     }
+
+    @DisplayName("POST /api/v1/me/points/charge")
+    @Nested
+    class ChargePoints {
+        private static final String ENDPOINT_CHARGE = "/api/v1/me/points/charge";
+
+        @DisplayName("존재하는 유저가 1000원을 충전할 경우, 충전된 보유 총량을 응답으로 반환한다.")
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void returnsChargedBalance_whenUserExists(Gender gender) {
+            // arrange
+            String userId = UserTestFixture.ValidUser.USER_ID;
+            String email = UserTestFixture.ValidUser.EMAIL;
+            String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
+            signUpFacade.signUp(userId, email, birthDate, gender);
+
+            Long chargeAmount = 1000L;
+            PointsV1Dto.ChargeRequest requestBody = new PointsV1Dto.ChargeRequest(chargeAmount);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.add("X-USER-ID", userId);
+            HttpEntity<PointsV1Dto.ChargeRequest> httpEntity = new HttpEntity<>(requestBody, headers);
+
+            // act
+            ParameterizedTypeReference<ApiResponse<PointsV1Dto.PointsResponse>> responseType = new ParameterizedTypeReference<>() {};
+            ResponseEntity<ApiResponse<PointsV1Dto.PointsResponse>> response =
+                testRestTemplate.exchange(ENDPOINT_CHARGE, HttpMethod.POST, httpEntity, responseType);
+
+            // assert
+            assertAll(
+                () -> assertTrue(response.getStatusCode().is2xxSuccessful()),
+                () -> assertThat(response.getBody()).isNotNull(),
+                () -> assertThat(response.getBody().data()).isNotNull(),
+                () -> assertThat(response.getBody().data().userId()).isEqualTo(userId),
+                () -> assertThat(response.getBody().data().balance()).isEqualTo(chargeAmount),
+                () -> assertThat(response.getBody().meta().result()).isEqualTo(ApiResponse.Metadata.Result.SUCCESS)
+            );
+        }
+
+        @DisplayName("존재하지 않는 유저로 요청할 경우, `404 Not Found` 응답을 반환한다.")
+        @Test
+        void returns404_whenUserDoesNotExist() {
+            // arrange
+            String userId = "unknown";
+            Long chargeAmount = 1000L;
+            PointsV1Dto.ChargeRequest requestBody = new PointsV1Dto.ChargeRequest(chargeAmount);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.add("X-USER-ID", userId);
+            HttpEntity<PointsV1Dto.ChargeRequest> httpEntity = new HttpEntity<>(requestBody, headers);
+
+            // act
+            ParameterizedTypeReference<ApiResponse<Object>> responseType = new ParameterizedTypeReference<>() {};
+            ResponseEntity<ApiResponse<Object>> response =
+                testRestTemplate.exchange(ENDPOINT_CHARGE, HttpMethod.POST, httpEntity, responseType);
+
+            // assert
+            assertAll(
+                () -> assertThat(response.getStatusCode().value()).isEqualTo(404),
+                () -> assertThat(response.getBody()).isNotNull(),
+                () -> assertThat(response.getBody().meta()).isNotNull(),
+                () -> assertThat(response.getBody().meta().result()).isEqualTo(ApiResponse.Metadata.Result.FAIL)
+            );
+        }
+    }
 }
 
