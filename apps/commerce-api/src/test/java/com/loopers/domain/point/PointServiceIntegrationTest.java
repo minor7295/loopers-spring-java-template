@@ -2,6 +2,8 @@ package com.loopers.domain.point;
 
 import com.loopers.application.signup.SignUpFacade;
 import com.loopers.domain.user.Gender;
+import com.loopers.support.error.CoreException;
+import com.loopers.support.error.ErrorType;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
 public class PointServiceIntegrationTest {
@@ -65,6 +68,26 @@ public class PointServiceIntegrationTest {
 
             // assert
             assertThat(found).isNull();
+        }
+    }
+
+    @DisplayName("포인트 충전에 관한 통합 테스트")
+    @Nested
+    class PointCharge {
+        @DisplayName("존재하지 않는 유저 ID 로 충전을 시도한 경우, 실패한다.")
+        @Test
+        void fails_whenUserDoesNotExist() {
+            // arrange
+            String userId = "unknown";
+            Long chargeAmount = 1000L;
+
+            // act
+            CoreException result = assertThrows(CoreException.class, () ->
+                pointService.charge(userId, chargeAmount)
+            );
+
+            // assert
+            assertThat(result.getErrorType()).isEqualTo(ErrorType.NOT_FOUND);
         }
     }
 }
