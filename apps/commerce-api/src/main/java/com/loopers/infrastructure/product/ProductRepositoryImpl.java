@@ -47,6 +47,14 @@ public class ProductRepositoryImpl implements ProductRepository {
      * {@inheritDoc}
      */
     @Override
+    public Optional<Product> findByIdForUpdate(Long productId) {
+        return productJpaRepository.findByIdForUpdate(productId);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public List<Product> findAll(Long brandId, String sort, int page, int size) {
         Pageable pageable = createPageable(sort, page, size);
         Page<Product> productPage = brandId != null

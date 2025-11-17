@@ -25,4 +25,15 @@ public interface UserRepository {
      * @return 조회된 사용자, 없으면 null
      */
     User findByUserId(String userId);
+
+    /**
+     * 사용자 ID로 사용자를 조회합니다. (비관적 락)
+     * <p>
+     * 동시성 제어가 필요한 경우 사용합니다. (예: 포인트 차감)
+     * </p>
+     *
+     * @param userId 조회할 사용자 ID
+     * @return 조회된 사용자, 없으면 null
+     */
+    User findByUserIdForUpdate(String userId);
 }

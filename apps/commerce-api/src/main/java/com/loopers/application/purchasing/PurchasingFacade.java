@@ -55,7 +55,8 @@ public class PurchasingFacade {
             throw new CoreException(ErrorType.BAD_REQUEST, "주문 아이템은 1개 이상이어야 합니다.");
         }
 
-        User user = loadUser(userId);
+        // 비관적 락을 사용하여 사용자 조회 (포인트 차감 시 동시성 제어)
+        User user = loadUserForUpdate(userId);
 
         Set<Long> productIds = new HashSet<>();
         List<Product> products = new ArrayList<>();
@@ -67,7 +68,8 @@ public class PurchasingFacade {
                     String.format("상품이 중복되었습니다. (상품 ID: %d)", command.productId()));
             }
 
-            Product product = productRepository.findById(command.productId())
+            // 비관적 락을 사용하여 상품 조회 (재고 차감 시 동시성 제어)
+            Product product = productRepository.findByIdForUpdate(command.productId())
                 .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
                     String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", command.productId())));
             products.add(product);
@@ -193,6 +195,24 @@ public class PurchasingFacade {
 
     private User loadUser(String userId) {
         User user = userRepository.findByUserId(userId);
+        if (user == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+        return user;
+    }
+
+    /**
+     * 비관적 락을 사용하여 사용자를 조회합니다.
+     * <p>
+     * 포인트 차감 등 동시성 제어가 필요한 경우 사용합니다.
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @return 조회된 사용자
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
+    private User loadUserForUpdate(String userId) {
+        User user = userRepository.findByUserIdForUpdate(userId);
         if (user == null) {
             throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
         }
