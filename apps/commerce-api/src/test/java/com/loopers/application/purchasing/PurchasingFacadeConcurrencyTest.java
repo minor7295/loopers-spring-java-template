@@ -2,6 +2,11 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
+import com.loopers.domain.coupon.Coupon;
+import com.loopers.domain.coupon.CouponRepository;
+import com.loopers.domain.coupon.CouponType;
+import com.loopers.domain.coupon.UserCoupon;
+import com.loopers.domain.coupon.UserCouponRepository;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.product.Product;
@@ -58,6 +63,12 @@ class PurchasingFacadeConcurrencyTest {
     private OrderRepository orderRepository;
 
     @Autowired
+    private CouponRepository couponRepository;
+
+    @Autowired
+    private UserCouponRepository userCouponRepository;
+
+    @Autowired
     private DatabaseCleanUp databaseCleanUp;
 
     @AfterEach
@@ -78,6 +89,16 @@ class PurchasingFacadeConcurrencyTest {
     private Product createAndSaveProduct(String productName, int price, int stock, Long brandId) {
         Product product = Product.of(productName, price, stock, brandId);
         return productRepository.save(product);
+    }
+
+    private Coupon createAndSaveCoupon(String code, CouponType type, Integer discountValue) {
+        Coupon coupon = Coupon.of(code, type, discountValue);
+        return couponRepository.save(coupon);
+    }
+
+    private UserCoupon createAndSaveUserCoupon(Long userId, Coupon coupon) {
+        UserCoupon userCoupon = UserCoupon.of(userId, coupon);
+        return userCouponRepository.save(userCoupon);
     }
 
     @Test
@@ -105,7 +126,7 @@ class PurchasingFacadeConcurrencyTest {
             executorService.submit(() -> {
                 try {
                     List<OrderItemCommand> commands = List.of(
-                        new OrderItemCommand(products.get(index).getId(), 1)
+                        OrderItemCommand.of(products.get(index).getId(), 1)
                     );
                     purchasingFacade.createOrder(userId, commands);
                     successCount.incrementAndGet();
@@ -153,7 +174,7 @@ class PurchasingFacadeConcurrencyTest {
             executorService.submit(() -> {
                 try {
                     List<OrderItemCommand> commands = List.of(
-                        new OrderItemCommand(productId, quantityPerOrder)
+                        OrderItemCommand.of(productId, quantityPerOrder)
                     );
                     purchasingFacade.createOrder(userId, commands);
                     successCount.incrementAndGet();
@@ -180,33 +201,20 @@ class PurchasingFacadeConcurrencyTest {
     @Test
     @DisplayName("동일한 쿠폰으로 여러 기기에서 동시에 주문해도, 쿠폰은 단 한번만 사용되어야 한다")
     void concurrencyTest_couponShouldBeUsedOnlyOnceWhenOrdersCreated() throws InterruptedException {
-        // 주의: 현재 프로젝트에는 쿠폰 기능이 구현되어 있지 않습니다.
-        // 이 테스트는 쿠폰 기능이 추가될 때를 대비한 예시입니다.
-        // 
-        // 쿠폰 기능이 추가되면 다음과 같이 구현해야 합니다:
-        // 1. Coupon 도메인 엔티티 생성 (code, discountAmount, isUsed 등)
-        // 2. CouponRepository 생성
-        // 3. PurchasingFacade에서 쿠폰 사용 로직 추가 (낙관적/비관적 락 사용)
-        // 4. 이 테스트에서 실제 쿠폰 사용 여부 검증
-        //
-        // 예시 구현:
-        // @Transactional
-        // public OrderInfo createOrderWithCoupon(String userId, List<OrderItemCommand> commands, String couponCode) {
-        //     Coupon coupon = couponRepository.findByCodeForUpdate(couponCode); // 비관적 락
-        //     if (coupon.isUsed()) {
-        //         throw new CoreException(ErrorType.BAD_REQUEST, "이미 사용된 쿠폰입니다.");
-        //     }
-        //     coupon.use(); // 쿠폰 사용 처리
-        //     // ... 주문 생성 로직
-        // }
-        
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
         String userId = user.getUserId();
         Brand brand = createAndSaveBrand("테스트 브랜드");
         Product product = createAndSaveProduct("테스트 상품", 10_000, 100, brand.getId());
 
-        int concurrentRequestCount = 5;
+        // 정액 쿠폰 생성 (5,000원 할인)
+        Coupon coupon = createAndSaveCoupon("COUPON001", CouponType.FIXED_AMOUNT, 5_000);
+        String couponCode = coupon.getCode();
+
+        // 사용자에게 쿠폰 지급
+        UserCoupon userCoupon = createAndSaveUserCoupon(user.getId(), coupon);
+
+        int concurrentRequestCount = 10; // 요구사항: 10개 스레드
 
         ExecutorService executorService = Executors.newFixedThreadPool(concurrentRequestCount);
         CountDownLatch latch = new CountDownLatch(concurrentRequestCount);
@@ -218,7 +226,7 @@ class PurchasingFacadeConcurrencyTest {
             executorService.submit(() -> {
                 try {
                     List<OrderItemCommand> commands = List.of(
-                        new OrderItemCommand(product.getId(), 1)
+                        new OrderItemCommand(product.getId(), 1, couponCode)
                     );
                     purchasingFacade.createOrder(userId, commands);
                     successCount.incrementAndGet();
@@ -235,7 +243,23 @@ class PurchasingFacadeConcurrencyTest {
         executorService.shutdown();
 
         // assert
-        assertThat(successCount.get()).isEqualTo(concurrentRequestCount);
+        // 쿠폰은 정확히 1번만 사용되어야 함
+        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), couponCode)
+            .orElseThrow();
+        assertThat(savedUserCoupon.isAvailable()).isFalse(); // 사용됨
+        assertThat(savedUserCoupon.getIsUsed()).isTrue();
+
+        // 성공한 주문은 1개만 있어야 함 (나머지는 쿠폰 중복 사용으로 실패)
+        assertThat(successCount.get()).isEqualTo(1);
+        assertThat(exceptions).hasSize(concurrentRequestCount - 1);
+
+        // 성공한 주문의 할인 금액이 적용되었는지 확인
+        List<Order> orders = orderRepository.findAllByUserId(user.getId());
+        assertThat(orders).hasSize(1);
+        Order order = orders.get(0);
+        assertThat(order.getCouponCode()).isEqualTo(couponCode);
+        assertThat(order.getDiscountAmount()).isEqualTo(5_000);
+        assertThat(order.getTotalAmount()).isEqualTo(5_000); // 10,000 - 5,000 = 5,000
     }
 
     @Test
@@ -251,7 +275,7 @@ class PurchasingFacadeConcurrencyTest {
         // 주문 생성 (재고 5개 차감)
         int orderQuantity = 5;
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(productId, orderQuantity)
+            OrderItemCommand.of(productId, orderQuantity)
         );
         OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
         Long orderId = orderInfo.orderId();
@@ -291,7 +315,7 @@ class PurchasingFacadeConcurrencyTest {
                 try {
                     Thread.sleep(10); // 취소가 시작된 후 실행되도록 약간의 지연
                     List<OrderItemCommand> otherCommands = List.of(
-                        new OrderItemCommand(productId, 3)
+                        OrderItemCommand.of(productId, 3)
                     );
                     purchasingFacade.createOrder(userId, otherCommands);
                     orderSuccess.incrementAndGet();

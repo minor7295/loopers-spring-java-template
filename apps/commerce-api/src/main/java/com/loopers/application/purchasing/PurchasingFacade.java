@@ -1,8 +1,14 @@
 package com.loopers.application.purchasing;
 
+import com.loopers.domain.coupon.Coupon;
+import com.loopers.domain.coupon.CouponRepository;
+import com.loopers.domain.coupon.UserCoupon;
+import com.loopers.domain.coupon.UserCouponRepository;
+import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
 import com.loopers.domain.order.OrderRepository;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Point;
@@ -35,6 +41,9 @@ public class PurchasingFacade {
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
+    private final CouponRepository couponRepository;
+    private final UserCouponRepository userCouponRepository;
+    private final CouponDiscountStrategyFactory couponDiscountStrategyFactory;
 
     /**
      * 주문을 생성한다.
@@ -103,7 +112,14 @@ public class PurchasingFacade {
             ));
         }
 
-        Order order = Order.of(user.getId(), orderItems);
+        // 쿠폰 처리 (있는 경우)
+        String couponCode = extractCouponCode(commands);
+        Integer discountAmount = 0;
+        if (couponCode != null && !couponCode.isBlank()) {
+            discountAmount = applyCoupon(user.getId(), couponCode, calculateSubtotal(orderItems));
+        }
+
+        Order order = Order.of(user.getId(), orderItems, couponCode, discountAmount);
 
         decreaseStocksForOrderItems(order.getItems(), products);
         deductUserPoint(user, order.getTotalAmount());
@@ -238,6 +254,87 @@ public class PurchasingFacade {
             throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
         }
         return user;
+    }
+
+    /**
+     * 주문 명령에서 쿠폰 코드를 추출합니다.
+     *
+     * @param commands 주문 명령 목록
+     * @return 쿠폰 코드 (없으면 null)
+     */
+    private String extractCouponCode(List<OrderItemCommand> commands) {
+        return commands.stream()
+            .filter(cmd -> cmd.couponCode() != null && !cmd.couponCode().isBlank())
+            .map(OrderItemCommand::couponCode)
+            .findFirst()
+            .orElse(null);
+    }
+
+    /**
+     * 쿠폰을 적용하여 할인 금액을 계산하고 쿠폰을 사용 처리합니다.
+     * <p>
+     * <b>동시성 제어 전략:</b>
+     * <ul>
+     *   <li><b>OPTIMISTIC_LOCK 사용 근거:</b> 쿠폰 중복 사용 방지, Hot Spot 대응</li>
+     *   <li><b>@Version 필드:</b> UserCoupon 엔티티의 version 필드를 통해 자동으로 낙관적 락 적용</li>
+     *   <li><b>동시 사용 시:</b> 한 명만 성공하고 나머지는 OptimisticLockException 발생</li>
+     *   <li><b>사용 목적:</b> 동일 쿠폰으로 여러 기기에서 동시 주문해도 한 번만 사용되도록 보장</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param couponCode 쿠폰 코드
+     * @param subtotal 주문 소계 금액
+     * @return 할인 금액
+     * @throws CoreException 쿠폰을 찾을 수 없거나 사용 불가능한 경우, 동시 사용으로 인한 충돌 시
+     */
+    private Integer applyCoupon(Long userId, String couponCode, Integer subtotal) {
+        // 쿠폰 존재 여부 확인
+        Coupon coupon = couponRepository.findByCode(couponCode)
+            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
+                String.format("쿠폰을 찾을 수 없습니다. (쿠폰 코드: %s)", couponCode)));
+
+        // 낙관적 락을 사용하여 사용자 쿠폰 조회 (동시성 제어)
+        // @Version 필드가 있어 자동으로 낙관적 락이 적용됨
+        UserCoupon userCoupon = userCouponRepository.findByUserIdAndCouponCodeForUpdate(userId, couponCode)
+            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
+                String.format("사용자가 소유한 쿠폰을 찾을 수 없습니다. (쿠폰 코드: %s)", couponCode)));
+
+        // 쿠폰 사용 가능 여부 확인
+        if (!userCoupon.isAvailable()) {
+            throw new CoreException(ErrorType.BAD_REQUEST,
+                String.format("이미 사용된 쿠폰입니다. (쿠폰 코드: %s)", couponCode));
+        }
+
+        // 쿠폰 사용 처리
+        userCoupon.use();
+
+        // 할인 금액 계산 (전략 패턴 사용)
+        Integer discountAmount = coupon.calculateDiscountAmount(subtotal, couponDiscountStrategyFactory);
+
+        try {
+            // 사용자 쿠폰 저장 (version 체크 자동 수행)
+            // 다른 트랜잭션이 먼저 수정했다면 OptimisticLockException 발생
+            userCouponRepository.save(userCoupon);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            // 낙관적 락 충돌: 다른 트랜잭션이 먼저 쿠폰을 사용함
+            throw new CoreException(ErrorType.CONFLICT,
+                String.format("쿠폰이 이미 사용되었습니다. (쿠폰 코드: %s)", couponCode));
+        }
+
+        return discountAmount;
+    }
+
+    /**
+     * 주문 아이템 목록으로부터 소계 금액을 계산합니다.
+     *
+     * @param orderItems 주문 아이템 목록
+     * @return 계산된 소계 금액
+     */
+    private Integer calculateSubtotal(List<OrderItem> orderItems) {
+        return orderItems.stream()
+            .mapToInt(item -> item.getPrice() * item.getQuantity())
+            .sum();
     }
 }
 

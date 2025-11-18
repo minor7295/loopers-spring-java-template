@@ -2,6 +2,12 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
+import com.loopers.domain.coupon.Coupon;
+import com.loopers.domain.coupon.CouponRepository;
+import com.loopers.domain.coupon.CouponType;
+import com.loopers.domain.coupon.UserCoupon;
+import com.loopers.domain.coupon.UserCouponRepository;
+import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
@@ -38,6 +44,15 @@ class PurchasingFacadeTest {
     
     @Autowired
     private BrandRepository brandRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private CouponRepository couponRepository;
+
+    @Autowired
+    private UserCouponRepository userCouponRepository;
     
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
@@ -73,8 +88,8 @@ class PurchasingFacadeTest {
         Product product2 = createAndSaveProduct("상품2", 5_000, 5, brand.getId());
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product1.getId(), 2),
-            new OrderItemCommand(product2.getId(), 1)
+            OrderItemCommand.of(product1.getId(), 2),
+            OrderItemCommand.of(product2.getId(), 1)
         );
 
         // act
@@ -113,7 +128,7 @@ class PurchasingFacadeTest {
         // arrange
         String unknownUserId = "unknown";
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(1L, 1)
+            OrderItemCommand.of(1L, 1)
         );
 
         // act & assert
@@ -135,7 +150,7 @@ class PurchasingFacadeTest {
         final int initialStock = product.getStock();
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(productId, 2)
+            OrderItemCommand.of(productId, 2)
         );
 
         // act & assert
@@ -165,7 +180,7 @@ class PurchasingFacadeTest {
         final int initialStock = product.getStock();
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(productId, 1)
+            OrderItemCommand.of(productId, 1)
         );
 
         // act & assert
@@ -195,7 +210,7 @@ class PurchasingFacadeTest {
         final int initialStock = product.getStock();
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(productId, 1)
+            OrderItemCommand.of(productId, 1)
         );
 
         // act & assert
@@ -224,8 +239,8 @@ class PurchasingFacadeTest {
         final Long productId = product.getId();
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(productId, 1),
-            new OrderItemCommand(productId, 2)
+            OrderItemCommand.of(productId, 1),
+            OrderItemCommand.of(productId, 2)
         );
 
         // act & assert
@@ -247,7 +262,7 @@ class PurchasingFacadeTest {
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1)
+            OrderItemCommand.of(product.getId(), 1)
         );
         purchasingFacade.createOrder(user.getUserId(), commands);
 
@@ -268,7 +283,7 @@ class PurchasingFacadeTest {
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1)
+            OrderItemCommand.of(product.getId(), 1)
         );
         OrderInfo createdOrder = purchasingFacade.createOrder(user.getUserId(), commands);
 
@@ -293,7 +308,7 @@ class PurchasingFacadeTest {
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1)
+            OrderItemCommand.of(product.getId(), 1)
         );
         OrderInfo user1Order = purchasingFacade.createOrder(user1Id, commands);
         final Long orderId = user1Order.orderId();
@@ -322,8 +337,8 @@ class PurchasingFacadeTest {
 
         // product2의 재고가 부족한 상황 (3개 재고인데 5개 주문)
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product1Id, 2),
-            new OrderItemCommand(product2Id, 5) // 재고 부족
+            OrderItemCommand.of(product1Id, 2),
+            OrderItemCommand.of(product2Id, 5) // 재고 부족
         );
 
         // act & assert
@@ -363,8 +378,8 @@ class PurchasingFacadeTest {
         final int initialStock2 = product2.getStock();
 
         List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product1Id, 3),
-            new OrderItemCommand(product2Id, 2)
+            OrderItemCommand.of(product1Id, 3),
+            OrderItemCommand.of(product2Id, 2)
         );
         final int totalAmount = (10_000 * 3) + (15_000 * 2);
 
@@ -390,6 +405,135 @@ class PurchasingFacadeTest {
         List<OrderInfo> orders = purchasingFacade.getOrders(userId);
         assertThat(orders).hasSize(1);
         assertThat(orders.get(0).orderId()).isEqualTo(orderInfo.orderId());
+    }
+
+    @Test
+    @DisplayName("정액 쿠폰을 적용하여 주문할 수 있다")
+    void createOrder_withFixedAmountCoupon_success() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        String userId = user.getUserId();
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        Coupon coupon = Coupon.of("FIXED5000", CouponType.FIXED_AMOUNT, 5_000);
+        couponRepository.save(coupon);
+        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
+        userCouponRepository.save(userCoupon);
+
+        List<OrderItemCommand> commands = List.of(
+            new OrderItemCommand(product.getId(), 1, "FIXED5000")
+        );
+
+        // act
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+
+        // assert
+        assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
+        assertThat(orderInfo.totalAmount()).isEqualTo(5_000); // 10,000 - 5,000 = 5,000
+
+        // 쿠폰이 사용되었는지 확인
+        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), "FIXED5000")
+            .orElseThrow();
+        assertThat(savedUserCoupon.getIsUsed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("정률 쿠폰을 적용하여 주문할 수 있다")
+    void createOrder_withPercentageCoupon_success() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        String userId = user.getUserId();
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        Coupon coupon = Coupon.of("PERCENT20", CouponType.PERCENTAGE, 20);
+        couponRepository.save(coupon);
+        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
+        userCouponRepository.save(userCoupon);
+
+        List<OrderItemCommand> commands = List.of(
+            new OrderItemCommand(product.getId(), 1, "PERCENT20")
+        );
+
+        // act
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+
+        // assert
+        assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
+        assertThat(orderInfo.totalAmount()).isEqualTo(8_000); // 10,000 - (10,000 * 20%) = 8,000
+
+        // 쿠폰이 사용되었는지 확인
+        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), "PERCENT20")
+            .orElseThrow();
+        assertThat(savedUserCoupon.getIsUsed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 쿠폰으로 주문하면 실패한다")
+    void createOrder_withNonExistentCoupon_shouldFail() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        String userId = user.getUserId();
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        List<OrderItemCommand> commands = List.of(
+            new OrderItemCommand(product.getId(), 1, "NON_EXISTENT")
+        );
+
+        // act & assert
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("사용자가 소유하지 않은 쿠폰으로 주문하면 실패한다")
+    void createOrder_withCouponNotOwnedByUser_shouldFail() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        String userId = user.getUserId();
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        Coupon coupon = Coupon.of("COUPON001", CouponType.FIXED_AMOUNT, 5_000);
+        couponRepository.save(coupon);
+        // 사용자에게 쿠폰을 지급하지 않음
+
+        List<OrderItemCommand> commands = List.of(
+            new OrderItemCommand(product.getId(), 1, "COUPON001")
+        );
+
+        // act & assert
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("이미 사용된 쿠폰으로 주문하면 실패한다")
+    void createOrder_withUsedCoupon_shouldFail() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        String userId = user.getUserId();
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        Coupon coupon = Coupon.of("USED_COUPON", CouponType.FIXED_AMOUNT, 5_000);
+        couponRepository.save(coupon);
+        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
+        userCoupon.use(); // 이미 사용 처리
+        userCouponRepository.save(userCoupon);
+
+        List<OrderItemCommand> commands = List.of(
+            new OrderItemCommand(product.getId(), 1, "USED_COUPON")
+        );
+
+        // act & assert
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
     }
 
 }
