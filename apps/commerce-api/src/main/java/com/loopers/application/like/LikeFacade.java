@@ -15,6 +15,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 좋아요 관리 파사드.
@@ -31,6 +34,7 @@ public class LikeFacade {
     private final LikeRepository likeRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final ExecutorService executorService;
 
     /**
      * 상품에 좋아요를 추가합니다.
@@ -100,6 +104,9 @@ public class LikeFacade {
 
     /**
      * 사용자가 좋아요한 상품 목록을 조회합니다.
+     * <p>
+     * 상품 정보 조회와 좋아요 수 집계를 병렬로 처리하여 성능을 최적화합니다.
+     * </p>
      *
      * @param userId 사용자 ID (String)
      * @return 좋아요한 상품 목록
@@ -121,15 +128,48 @@ public class LikeFacade {
             .map(Like::getProductId)
             .toList();
 
-        // 상품 정보 조회
-        List<Product> products = productIds.stream()
-            .map(productId -> productRepository.findById(productId)
-                .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                    String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId))))
+        // ✅ 병렬로 상품 정보 조회
+        List<CompletableFuture<Product>> productFutures = productIds.stream()
+            .map(productId -> CompletableFuture.supplyAsync(() -> {
+                try {
+                    return productRepository.findById(productId)
+                        .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
+                            String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId)));
+                } catch (CoreException e) {
+                    throw new CompletionException(e);
+                }
+            }, executorService))
             .toList();
 
-        // 좋아요 수 집계
-        Map<Long, Long> likesCountMap = likeRepository.countByProductIds(productIds);
+        // ✅ 병렬로 좋아요 수 집계
+        CompletableFuture<Map<Long, Long>> likesCountFuture = CompletableFuture.supplyAsync(() ->
+            likeRepository.countByProductIds(productIds),
+            executorService);
+
+        // 모든 작업 완료 대기
+        CompletableFuture.allOf(
+            productFutures.toArray(new CompletableFuture[0])
+        ).join();
+
+        // 결과 수집
+        List<Product> products = productFutures.stream()
+            .map(future -> {
+                try {
+                    return future.join();
+                } catch (CompletionException e) {
+                    if (e.getCause() instanceof CoreException) {
+                        throw (CoreException) e.getCause();
+                    }
+                    String errorMessage = "상품 조회 중 오류가 발생했습니다.";
+                    if (e.getCause() != null) {
+                        errorMessage += " 원인: " + e.getCause().getMessage();
+                    }
+                    throw new CoreException(ErrorType.INTERNAL_ERROR, errorMessage);
+                }
+            })
+            .toList();
+
+        Map<Long, Long> likesCountMap = likesCountFuture.join();
 
         // 좋아요 목록을 상품 정보와 좋아요 수와 함께 변환
         return likes.stream()
