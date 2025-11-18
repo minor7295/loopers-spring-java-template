@@ -34,6 +34,14 @@ public interface ProductRepository {
      * <p>
      * 동시성 제어가 필요한 경우 사용합니다. (예: 재고 차감)
      * </p>
+     * <p>
+     * <b>Lock 전략:</b>
+     * <ul>
+     *   <li><b>PESSIMISTIC_WRITE:</b> SELECT ... FOR UPDATE 사용</li>
+     *   <li><b>Lock 범위:</b> PK(id) 기반 조회로 해당 행만 락 (최소화)</li>
+     *   <li><b>사용 목적:</b> 재고 차감 시 Lost Update 방지</li>
+     * </ul>
+     * </p>
      *
      * @param productId 조회할 상품 ID
      * @return 조회된 상품을 담은 Optional

@@ -8,7 +8,7 @@ import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -105,6 +105,7 @@ public class LikeFacade {
      * @return 좋아요한 상품 목록
      * @throws CoreException 사용자를 찾을 수 없는 경우
      */
+    @Transactional(readOnly = true)
     public List<LikedProduct> getLikedProducts(String userId) {
         User user = loadUser(userId);
 

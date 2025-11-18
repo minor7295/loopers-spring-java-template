@@ -10,7 +10,7 @@ import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -44,6 +44,23 @@ public class PurchasingFacade {
      * 3. 사용자 포인트 검증 및 차감<br>
      * 4. 주문 저장 및 외부 시스템 알림
      * </p>
+     * <p>
+     * <b>동시성 제어 전략:</b>
+     * <ul>
+     *   <li><b>PESSIMISTIC_WRITE 사용 근거:</b> Lost Update 방지 및 데이터 일관성 보장</li>
+     *   <li><b>포인트 차감:</b> 동시 주문 시 포인트 중복 차감 방지</li>
+     *   <li><b>재고 차감:</b> 동시 주문 시 재고 음수 방지 및 정확한 차감 보장</li>
+     *   <li><b>Lock 범위 최소화:</b> PK/UNIQUE 인덱스 기반 조회로 Lock 범위 최소화</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>Lock 생명주기:</b>
+     * <ol>
+     *   <li>SELECT ... FOR UPDATE 실행 시 락 획득</li>
+     *   <li>트랜잭션 내에서 락 유지</li>
+     *   <li>트랜잭션 커밋/롤백 시 락 자동 해제</li>
+     * </ol>
+     * </p>
      *
      * @param userId 사용자 식별자 (로그인 ID)
      * @param commands 주문 상품 정보
@@ -56,6 +73,8 @@ public class PurchasingFacade {
         }
 
         // 비관적 락을 사용하여 사용자 조회 (포인트 차감 시 동시성 제어)
+        // - userId는 UNIQUE 인덱스가 있어 Lock 범위 최소화
+        // - Lost Update 방지: 동시 주문 시 포인트 중복 차감 방지
         User user = loadUserForUpdate(userId);
 
         Set<Long> productIds = new HashSet<>();
@@ -69,6 +88,8 @@ public class PurchasingFacade {
             }
 
             // 비관적 락을 사용하여 상품 조회 (재고 차감 시 동시성 제어)
+            // - id는 PK 인덱스가 있어 Lock 범위 최소화
+            // - Lost Update 방지: 동시 주문 시 재고 음수 방지 및 정확한 차감 보장
             Product product = productRepository.findByIdForUpdate(command.productId())
                 .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
                     String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", command.productId())));
@@ -129,7 +150,7 @@ public class PurchasingFacade {
      * @param userId 사용자 식별자 (로그인 ID)
      * @return 주문 목록
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public List<OrderInfo> getOrders(String userId) {
         User user = loadUser(userId);
         List<Order> orders = orderRepository.findAllByUserId(user.getId());
@@ -145,7 +166,7 @@ public class PurchasingFacade {
      * @param orderId 주문 ID
      * @return 주문 정보
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public OrderInfo getOrder(String userId, Long orderId) {
         User user = loadUser(userId);
         Order order = orderRepository.findById(orderId)
