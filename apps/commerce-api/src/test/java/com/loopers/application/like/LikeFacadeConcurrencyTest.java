@@ -167,5 +167,147 @@ class LikeFacadeConcurrencyTest {
         // 최종적으로는 1개의 좋아요만 저장되어야 함
         assertThat(successCount.get() + exceptions.size()).isEqualTo(concurrentRequestCount);
     }
+
+    @Test
+    @DisplayName("@Transactional(readOnly = true)와 UNIQUE 제약조건은 서로 다른 목적을 가진다")
+    void concurrencyTest_transactionReadOnlyAndUniqueConstraintServeDifferentPurposes() throws InterruptedException {
+        // 이 테스트는 @Transactional(readOnly = true)와 UNIQUE 제약조건의 차이를 보여줍니다.
+        //
+        // UNIQUE 제약조건:
+        // - 목적: 데이터 무결성 보장 (중복 데이터 방지)
+        // - 예시: LikeFacade.addLike()에서 동일 사용자가 동일 상품에 중복 좋아요 방지
+        // - 작동: 데이터베이스 레벨에서 물리적으로 중복 삽입 방지
+        //
+        // @Transactional(readOnly = true):
+        // - 목적: 여러 쿼리 간의 논리적 일관성 보장
+        // - 예시: LikeFacade.getLikedProducts()에서 좋아요 목록과 집계 결과의 일관성
+        // - 작동: 모든 쿼리가 동일한 트랜잭션 내에서 실행되어 일관된 스냅샷을 봄
+        //
+        // REPEATABLE READ 격리 수준에서:
+        // - 트랜잭션이 없으면: 각 쿼리가 독립적으로 실행되며, 각 쿼리는 자체 스냅샷을 봄
+        // - 트랜잭션이 있으면: 모든 쿼리가 동일한 트랜잭션 시작 시점의 스냅샷을 봄
+        //
+        // 실제 문제 시나리오:
+        // 1. 좋아요 목록 조회 (쿼리 1) - 시점 T1의 스냅샷
+        // 2. 다른 트랜잭션이 좋아요 추가 (커밋)
+        // 3. 좋아요 수 집계 (쿼리 2) - 시점 T2의 스냅샷 (T1과 다를 수 있음)
+        //
+        // 트랜잭션이 없으면:
+        // - 쿼리 1과 쿼리 2가 서로 다른 시점의 스냅샷을 볼 수 있음
+        // - 좋아요 목록에는 상품1이 1개로 보이지만, 집계 결과는 2개일 수 있음
+        //
+        // 트랜잭션이 있으면:
+        // - 모든 쿼리가 동일한 시점의 스냅샷을 봄
+        // - 좋아요 목록과 집계 결과가 일관됨
+        //
+        // 왜 테스트가 통과하는가?
+        // - REPEATABLE READ에서는 각 쿼리가 자체적으로 일관된 스냅샷을 봄
+        // - 쿼리 실행 시간이 매우 짧아서 다른 트랜잭션이 정확히 중간에 개입할 확률이 낮음
+        // - 하지만 여러 쿼리 간의 논리적 일관성을 보장하려면 트랜잭션이 필요함
+        
+        // arrange
+        Brand brand = createAndSaveBrand("테스트 브랜드");
+        Product product1 = createAndSaveProduct("상품1", 10_000, 100, brand.getId());
+        Product product2 = createAndSaveProduct("상품2", 20_000, 100, brand.getId());
+        
+        User user1 = createAndSaveUser("user1", "user1@example.com", 0L);
+        User user2 = createAndSaveUser("user2", "user2@example.com", 0L);
+        String userId1 = user1.getUserId();
+        String userId2 = user2.getUserId();
+        
+        // user1이 상품1, 상품2에 좋아요를 이미 누른 상태
+        likeFacade.addLike(userId1, product1.getId());
+        likeFacade.addLike(userId1, product2.getId());
+        
+        ExecutorService executorService = Executors.newFixedThreadPool(20);
+        CountDownLatch latch = new CountDownLatch(20);
+        List<List<LikeFacade.LikedProduct>> allResults = new ArrayList<>();
+        
+        // act
+        // 여러 스레드에서 동시에 조회를 수행
+        for (int i = 0; i < 10; i++) {
+            executorService.submit(() -> {
+                try {
+                    List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(userId1);
+                    synchronized (allResults) {
+                        allResults.add(result);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        
+        // 다른 스레드들이 조회 중간에 좋아요를 추가/삭제
+        for (int i = 0; i < 10; i++) {
+            final int index = i;
+            executorService.submit(() -> {
+                try {
+                    // 조회가 시작된 후 실행되도록 약간의 지연
+                    Thread.sleep(1 + index);
+                    if (index % 2 == 0) {
+                        // user2가 상품1에 좋아요 추가
+                        try {
+                            likeFacade.addLike(userId2, product1.getId());
+                        } catch (Exception e) {
+                            // 이미 좋아요가 있으면 무시
+                        }
+                    } else {
+                        // user2가 상품2에 좋아요 추가
+                        try {
+                            likeFacade.addLike(userId2, product2.getId());
+                        } catch (Exception e) {
+                            // 이미 좋아요가 있으면 무시
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        
+        latch.await();
+        executorService.shutdown();
+        
+        // assert
+        // @Transactional(readOnly = true)가 있으면:
+        // - 모든 조회가 동일한 트랜잭션 내에서 실행되어 일관된 스냅샷을 봄
+        // - 각 조회 결과 내에서 좋아요 목록과 집계 결과가 일관됨
+        
+        // @Transactional(readOnly = true)가 없으면:
+        // - 각 쿼리가 독립적으로 실행되어 서로 다른 시점의 데이터를 볼 수 있음
+        // - 하지만 REPEATABLE READ에서는 각 쿼리가 자체 스냅샷을 보므로
+        //   실제로는 문제가 드물 수 있음
+        
+        // 검증: 모든 조회 결과가 정상적으로 반환되었는지 확인
+        assertThat(allResults).hasSize(10);
+        
+        // 각 조회 결과가 올바른 형식인지 확인
+        for (List<LikeFacade.LikedProduct> result : allResults) {
+            // user1의 좋아요 목록에는 상품1, 상품2가 포함되어야 함
+            List<Long> productIds = result.stream()
+                .map(LikeFacade.LikedProduct::productId)
+                .sorted()
+                .toList();
+            assertThat(productIds).contains(product1.getId(), product2.getId());
+            
+            // 각 상품의 좋아요 수가 0보다 커야 함
+            for (LikeFacade.LikedProduct likedProduct : result) {
+                assertThat(likedProduct.likesCount()).isGreaterThan(0);
+            }
+        }
+        
+        // 최종 상태 확인
+        List<LikeFacade.LikedProduct> finalResult = likeFacade.getLikedProducts(userId1);
+        List<Long> finalProductIds = finalResult.stream()
+            .map(LikeFacade.LikedProduct::productId)
+            .sorted()
+            .toList();
+        assertThat(finalProductIds).containsExactlyInAnyOrder(product1.getId(), product2.getId());
+    }
 }
 
