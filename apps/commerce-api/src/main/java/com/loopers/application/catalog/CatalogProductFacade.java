@@ -2,20 +2,15 @@ package com.loopers.application.catalog;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
-import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
-import com.loopers.domain.product.ProductDetailService;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 상품 조회 파사드.
@@ -31,8 +26,6 @@ import java.util.stream.Collectors;
 public class CatalogProductFacade {
     private final ProductRepository productRepository;
     private final BrandRepository brandRepository;
-    private final LikeRepository likeRepository;
-    private final ProductDetailService productDetailService;
 
     /**
      * 상품 목록을 조회합니다.
@@ -67,12 +60,11 @@ public class CatalogProductFacade {
         Brand brand = brandRepository.findById(product.getBrandId())
             .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "브랜드를 찾을 수 없습니다."));
         
-        // 좋아요 수 조회
-        Map<Long, Long> likesCountMap = likeRepository.countByProductIds(List.of(productId));
-        Long likesCount = likesCountMap.getOrDefault(productId, 0L);
+        // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+        Long likesCount = product.getLikeCount();
         
-        // 도메인 서비스를 통해 ProductDetail 생성 (도메인 객체 협력)
-        ProductDetail productDetail = productDetailService.combineProductAndBrand(product, brand, likesCount);
+        // ProductDetail 생성 (Aggregate 경계 준수: Brand 엔티티 대신 brandName만 전달)
+        ProductDetail productDetail = ProductDetail.from(product, brand.getName(), likesCount);
         
         return new ProductInfo(productDetail);
     }

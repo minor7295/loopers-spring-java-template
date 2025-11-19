@@ -49,6 +49,17 @@ public interface ProductRepository {
     Optional<Product> findByIdForUpdate(Long productId);
 
     /**
+     * 상품 ID 목록으로 상품 목록을 조회합니다.
+     * <p>
+     * 배치 조회를 통해 N+1 쿼리 문제를 해결합니다.
+     * </p>
+     *
+     * @param productIds 조회할 상품 ID 목록
+     * @return 조회된 상품 목록
+     */
+    List<Product> findAllById(List<Long> productIds);
+
+    /**
      * 상품 목록을 조회합니다.
      *
      * @param brandId 브랜드 ID (null이면 전체 조회)
@@ -66,5 +77,26 @@ public interface ProductRepository {
      * @return 상품 총 개수
      */
     long countAll(Long brandId);
+
+    /**
+     * 상품의 좋아요 수를 업데이트합니다.
+     * <p>
+     * 비동기 집계 스케줄러에서 사용됩니다.
+     * </p>
+     *
+     * @param productId 상품 ID
+     * @param likeCount 업데이트할 좋아요 수
+     */
+    void updateLikeCount(Long productId, Long likeCount);
+
+    /**
+     * 모든 상품 ID를 조회합니다.
+     * <p>
+     * Spring Batch Reader에서 사용됩니다.
+     * </p>
+     *
+     * @return 모든 상품 ID 목록
+     */
+    List<Long> findAllProductIds();
 }
 

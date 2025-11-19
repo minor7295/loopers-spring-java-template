@@ -13,15 +13,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
@@ -34,7 +30,6 @@ class LikeFacadeTest {
     private UserRepository userRepository;
     private ProductRepository productRepository;
     private LikeRepository likeRepository;
-    private ExecutorService executorService;
 
     private static final String DEFAULT_USER_ID = "testuser";
     private static final Long DEFAULT_USER_INTERNAL_ID = 1L;
@@ -45,13 +40,11 @@ class LikeFacadeTest {
         userRepository = mock(UserRepository.class);
         productRepository = mock(ProductRepository.class);
         likeRepository = mock(LikeRepository.class);
-        executorService = Executors.newFixedThreadPool(10);
 
         likeFacade = new LikeFacade(
             likeRepository,
             userRepository,
-            productRepository,
-            executorService
+            productRepository
         );
     }
 
@@ -157,18 +150,13 @@ class LikeFacadeTest {
         Like like2 = Like.of(DEFAULT_USER_INTERNAL_ID, productId2);
         List<Like> likes = List.of(like1, like2);
         
-        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L);
-        Product product2 = createMockProduct(productId2, "상품2", 20000, 20, 1L);
-        
-        Map<Long, Long> likesCountMap = Map.of(
-            productId1, 5L,
-            productId2, 3L
-        );
+        // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
+        Product product2 = createMockProduct(productId2, "상품2", 20000, 20, 1L, 3L);
         
         when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
         when(productRepository.findById(productId1)).thenReturn(Optional.of(product1));
         when(productRepository.findById(productId2)).thenReturn(Optional.of(product2));
-        when(likeRepository.countByProductIds(anyList())).thenReturn(likesCountMap);
         
         // act
         List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
@@ -208,12 +196,11 @@ class LikeFacadeTest {
         Like like2 = Like.of(DEFAULT_USER_INTERNAL_ID, nonExistentProductId);
         List<Like> likes = List.of(like1, like2);
         
-        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L);
+        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
         
         when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
         when(productRepository.findById(productId1)).thenReturn(Optional.of(product1));
         when(productRepository.findById(nonExistentProductId)).thenReturn(Optional.empty());
-        when(likeRepository.countByProductIds(anyList())).thenReturn(Map.of(productId1, 5L));
         
         // act & assert
         assertThatThrownBy(() -> likeFacade.getLikedProducts(DEFAULT_USER_ID))
@@ -252,13 +239,15 @@ class LikeFacadeTest {
         when(productRepository.findById(productId)).thenReturn(Optional.of(mockProduct));
     }
 
-    private Product createMockProduct(Long productId, String name, Integer price, Integer stock, Long brandId) {
+    private Product createMockProduct(Long productId, String name, Integer price, Integer stock, Long brandId, Long likeCount) {
         Product product = mock(Product.class);
         when(product.getId()).thenReturn(productId);
         when(product.getName()).thenReturn(name);
         when(product.getPrice()).thenReturn(price);
         when(product.getStock()).thenReturn(stock);
         when(product.getBrandId()).thenReturn(brandId);
+        // ✅ Product.likeCount 필드 mock 설정 (비동기 집계된 값)
+        when(product.getLikeCount()).thenReturn(likeCount);
         return product;
     }
 }

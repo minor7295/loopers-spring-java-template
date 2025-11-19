@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -75,5 +76,16 @@ public interface ProductJpaRepository extends JpaRepository<Product, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Product p WHERE p.id = :productId")
     Optional<Product> findByIdForUpdate(@Param("productId") Long productId);
+
+    /**
+     * 모든 상품 ID를 조회합니다.
+     * <p>
+     * 비동기 집계 스케줄러에서 사용됩니다.
+     * </p>
+     *
+     * @return 모든 상품 ID 목록
+     */
+    @Query("SELECT p.id FROM Product p")
+    List<Long> findAllProductIds();
 }
 

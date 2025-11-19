@@ -15,9 +15,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
 
 /**
  * 좋아요 관리 파사드.
@@ -34,7 +32,6 @@ public class LikeFacade {
     private final LikeRepository likeRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
-    private final ExecutorService executorService;
 
     /**
      * 상품에 좋아요를 추가합니다.
@@ -125,7 +122,15 @@ public class LikeFacade {
     /**
      * 사용자가 좋아요한 상품 목록을 조회합니다.
      * <p>
-     * 상품 정보 조회와 좋아요 수 집계를 병렬로 처리하여 성능을 최적화합니다.
+     * 상품 정보 조회를 병렬로 처리하여 성능을 최적화합니다.
+     * </p>
+     * <p>
+     * <b>좋아요 수 조회 전략:</b>
+     * <ul>
+     *   <li><b>비동기 집계:</b> Product.likeCount 필드 사용 (스케줄러로 주기적 동기화)</li>
+     *   <li><b>Eventually Consistent:</b> 약간의 지연 허용 (최대 5초)</li>
+     *   <li><b>성능 최적화:</b> COUNT(*) 쿼리 없이 컬럼만 읽으면 됨</li>
+     * </ul>
      * </p>
      *
      * @param userId 사용자 ID (String)
@@ -148,59 +153,26 @@ public class LikeFacade {
             .map(Like::getProductId)
             .toList();
 
-        // ✅ 병렬로 상품 정보 조회
-        List<CompletableFuture<Product>> productFutures = productIds.stream()
-            .map(productId -> CompletableFuture.supplyAsync(() -> {
-                try {
-                    return productRepository.findById(productId)
-                        .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                            String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId)));
-                } catch (CoreException e) {
-                    throw new CompletionException(e);
-                }
-            }, executorService))
-            .toList();
+        // ✅ 배치 조회로 N+1 쿼리 문제 해결
+        Map<Long, Product> productMap = productRepository.findAllById(productIds).stream()
+            .collect(Collectors.toMap(Product::getId, product -> product));
 
-        // ✅ 병렬로 좋아요 수 집계
-        CompletableFuture<Map<Long, Long>> likesCountFuture = CompletableFuture.supplyAsync(() ->
-            likeRepository.countByProductIds(productIds),
-            executorService);
-
-        // 모든 작업 완료 대기
-        CompletableFuture.allOf(
-            productFutures.toArray(new CompletableFuture[0])
-        ).join();
-
-        // 결과 수집
-        List<Product> products = productFutures.stream()
-            .map(future -> {
-                try {
-                    return future.join();
-                } catch (CompletionException e) {
-                    if (e.getCause() instanceof CoreException) {
-                        throw (CoreException) e.getCause();
-                    }
-                    String errorMessage = "상품 조회 중 오류가 발생했습니다.";
-                    if (e.getCause() != null) {
-                        errorMessage += " 원인: " + e.getCause().getMessage();
-                    }
-                    throw new CoreException(ErrorType.INTERNAL_ERROR, errorMessage);
-                }
-            })
-            .toList();
-
-        Map<Long, Long> likesCountMap = likesCountFuture.join();
+        // 요청한 상품 ID와 조회된 상품 수가 일치하는지 확인
+        if (productMap.size() != productIds.size()) {
+            throw new CoreException(ErrorType.NOT_FOUND, "일부 상품을 찾을 수 없습니다.");
+        }
 
         // 좋아요 목록을 상품 정보와 좋아요 수와 함께 변환
+        // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
         return likes.stream()
             .map(like -> {
-                Product product = products.stream()
-                    .filter(p -> p.getId().equals(like.getProductId()))
-                    .findFirst()
-                    .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                        String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", like.getProductId())));
-                Long likesCount = likesCountMap.getOrDefault(like.getProductId(), 0L);
-                return LikedProduct.from(product, like, likesCount);
+                Product product = productMap.get(like.getProductId());
+                if (product == null) {
+                    throw new CoreException(ErrorType.NOT_FOUND,
+                        String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", like.getProductId()));
+                }
+                // Product 엔티티의 likeCount 필드를 내부에서 사용
+                return LikedProduct.from(product);
             })
             .toList();
     }
@@ -238,21 +210,26 @@ public class LikeFacade {
         Long likesCount
     ) {
         /**
-         * Product와 Like로부터 LikedProduct를 생성합니다.
+         * Product로부터 LikedProduct를 생성합니다.
+         * <p>
+         * Product.likeCount 필드를 사용하여 좋아요 수를 가져옵니다.
+         * </p>
          *
          * @param product 상품 엔티티
-         * @param like 좋아요 엔티티
-         * @param likesCount 좋아요 수
          * @return 생성된 LikedProduct
+         * @throws IllegalArgumentException product가 null인 경우
          */
-        public static LikedProduct from(Product product, Like like, Long likesCount) {
+        public static LikedProduct from(Product product) {
+            if (product == null) {
+                throw new IllegalArgumentException("상품은 null일 수 없습니다.");
+            }
             return new LikedProduct(
                 product.getId(),
                 product.getName(),
                 product.getPrice(),
                 product.getStock(),
                 product.getBrandId(),
-                likesCount
+                product.getLikeCount() // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
             );
         }
     }

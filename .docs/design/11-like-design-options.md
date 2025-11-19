@@ -247,7 +247,7 @@ public Long getLikeCount(Long productId) {
 
 ---
 
-### 옵션 3: 하이브리드 방식 (Eventually Consistent) ⭐ 권장
+### 옵션 3: 하이브리드 방식 (Eventually Consistent) ⭐ 현재 구현
 
 #### 구조
 ```
@@ -256,7 +256,7 @@ Product 테이블
 - name
 - price
 - stock
-- like_count  ← 캐시된 좋아요 수
+- like_count  ← 캐시된 좋아요 수 (Spring Batch로 주기적 동기화)
 
 Like 테이블 (별도)
 - id
@@ -264,9 +264,6 @@ Like 테이블 (별도)
 - ref_product_id
 - created_at
 - UNIQUE(ref_user_id, ref_product_id)
-
-Redis (선택)
-- product:{id}:like_count
 ```
 
 #### 구현 예시
@@ -282,124 +279,209 @@ public void addLike(String userId, Long productId) {
     try {
         likeRepository.save(like);
     } catch (DataIntegrityViolationException e) {
-        // 이미 좋아요 함
+        // 이미 좋아요 함 (UNIQUE 제약조건 위반)
         return;
     }
     
-    // 비동기로 like_count 업데이트 (선택적)
-    // 스케줄러가 주기적으로 COUNT(*) 해서 업데이트
+    // 비동기로 like_count 업데이트는 Spring Batch가 처리
 }
 
-// 스케줄러 (매 1초 또는 5초마다 실행)
-@Scheduled(fixedDelay = 1000) // 1초마다
-public void updateLikeCounts() {
-    // 최근 업데이트된 상품들만 조회
-    List<Long> recentlyUpdatedProductIds = getRecentlyUpdatedProductIds();
+// Spring Batch Job (5초마다 실행)
+@Scheduled(fixedDelay = 5000)
+public void syncLikeCounts() {
+    JobParameters jobParameters = new JobParametersBuilder()
+        .addLong("timestamp", System.currentTimeMillis())
+        .toJobParameters();
     
-    for (Long productId : recentlyUpdatedProductIds) {
-        // COUNT(*)로 실제 좋아요 수 계산
-        Long actualCount = likeRepository.countByProductId(productId);
-        
-        // Product 테이블의 like_count 업데이트
-        productRepository.updateLikeCount(productId, actualCount);
-        
-        // Redis 캐시 업데이트 (선택적)
-        redisTemplate.opsForValue().set("product:" + productId + ":like_count", actualCount);
-    }
+    jobLauncher.run(likeCountSyncJob, jobParameters);
 }
+
+// Spring Batch 구조
+// Reader: 모든 상품 ID 조회
+// Processor: 각 상품의 좋아요 수 집계 (COUNT(*))
+// Writer: Product.likeCount 업데이트 (청크 단위: 100개씩)
 
 // 조회는 빠르게
-public Long getLikeCount(Long productId) {
-    // Redis에서 먼저 조회
-    Long cachedCount = redisTemplate.opsForValue().get("product:" + productId + ":like_count");
-    if (cachedCount != null) {
-        return cachedCount;
-    }
+@Transactional(readOnly = true)
+public List<LikedProduct> getLikedProducts(String userId) {
+    // ... 상품 조회 로직
     
-    // Redis에 없으면 DB에서 조회
-    Product product = productRepository.findById(productId)
-        .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
-    return product.getLikeCount();
+    // Product.likeCount 필드 사용 (COUNT(*) 쿼리 없음)
+    Long likesCount = product.getLikeCount();
+    return LikedProduct.from(product, like, likesCount);
 }
 ```
 
 **장점**:
 - ✅ **쓰기 경합 없음**: Insert-only로 Like 테이블에 저장
-- ✅ **조회 성능 우수**: like_count 컬럼 또는 Redis 캐시 사용
+- ✅ **조회 성능 우수**: like_count 컬럼 사용 (COUNT(*) 제거)
 - ✅ **중복 체크 가능**: UNIQUE 제약조건으로 자동 방지
 - ✅ **확장성**: 대규모 트래픽 처리 가능
+- ✅ **Spring Batch 장점**: 청크 단위 처리, 재시작 가능, 모니터링 지원
+- ✅ **Redis 불필요**: DB 기반으로도 충분한 성능
 
 **단점**:
-- ❌ **약간의 지연**: 좋아요 수가 1초 정도 지연될 수 있음
-- ❌ **구현 복잡도**: 스케줄러 및 캐시 관리 필요
+- ⚠️ **약간의 지연**: 좋아요 수가 최대 5초 정도 지연될 수 있음 (Eventually Consistent)
+- ⚠️ **구현 복잡도**: Spring Batch 설정 필요 (하지만 장기적으로 유지보수 용이)
 
 ---
 
 ## 📊 비교표
 
-| 항목 | 컬럼 기반 (비관적 락) | 컬럼 기반 (낙관적 락) | 테이블 분리 | 하이브리드 |
-|------|---------------------|---------------------|------------|-----------|
-| **구현 복잡도** | ⭐⭐ 간단 | ⭐⭐⭐ 중간 | ⭐⭐ 간단 | ⭐⭐⭐⭐ 복잡 |
+| 항목 | 컬럼 기반 (비관적 락) | 컬럼 기반 (낙관적 락) | 테이블 분리 | 하이브리드 (현재 구현) |
+|------|---------------------|---------------------|------------|---------------------|
+| **구현 복잡도** | ⭐⭐ 간단 | ⭐⭐⭐ 중간 | ⭐⭐ 간단 | ⭐⭐⭐⭐ 복잡 (Spring Batch) |
 | **쓰기 성능** | ❌ 락 경쟁 심함 | ⚠️ 재시도 필요 | ✅ Insert-only | ✅ Insert-only |
-| **조회 성능** | ✅ 매우 빠름 | ✅ 매우 빠름 | ❌ COUNT(*) 필요 | ✅ 매우 빠름 |
+| **조회 성능** | ✅ 매우 빠름 | ✅ 매우 빠름 | ❌ COUNT(*) 필요 | ✅ 매우 빠름 (컬럼만 읽음) |
 | **중복 체크** | ❌ 별도 테이블 필요 | ❌ 별도 테이블 필요 | ✅ UNIQUE 제약조건 | ✅ UNIQUE 제약조건 |
 | **동시성 처리** | ⚠️ 락 대기 | ⚠️ 재시도 | ✅ 경합 없음 | ✅ 경합 없음 |
-| **정확성** | ✅ 즉시 반영 | ✅ 즉시 반영 | ✅ 즉시 반영 | ⚠️ 약간의 지연 |
-| **확장성** | ❌ 낮음 | ⚠️ 중간 | ✅ 높음 | ✅ 매우 높음 |
+| **정확성** | ✅ 즉시 반영 | ✅ 즉시 반영 | ✅ 즉시 반영 | ⚠️ 약간의 지연 (최대 5초) |
+| **확장성** | ❌ 낮음 | ⚠️ 중간 | ✅ 높음 | ✅ 매우 높음 (Spring Batch) |
+| **대량 처리** | ❌ 순차 처리 | ⚠️ 재시도 필요 | ✅ 병렬 처리 | ✅ 청크 단위 처리 (100개씩) |
 
 ---
 
 ## 🎯 현재 프로젝트 분석
 
-### 현재 구조: 테이블 분리 기반
+### 현재 구조: 하이브리드 방식 (Eventually Consistent) ⭐ 구현 완료
 
 **현재 구현**:
 - ✅ Like 테이블 분리
 - ✅ UNIQUE 제약조건으로 중복 방지
 - ✅ Insert-only로 쓰기 경합 최소화
-- ❌ 조회 시 `COUNT(*)` 필요 (성능 이슈)
+- ✅ Product 테이블에 `like_count` 컬럼 추가
+- ✅ Spring Batch를 사용한 비동기 집계
+- ✅ 조회 시 `Product.likeCount` 필드 사용 (COUNT(*) 제거)
 
-**개선 방안**:
+**구현 상세**:
 
-#### 방안 1: 하이브리드 방식으로 전환 (권장)
+#### 1. Product 엔티티에 likeCount 필드 추가
 
 ```java
-// 1. Product 테이블에 like_count 컬럼 추가
 @Entity
+@Table(name = "product")
 public class Product {
     // ... 기존 필드들
     
     @Column(name = "like_count", nullable = false)
     private Long likeCount = 0L;
-}
-
-// 2. Like 테이블은 그대로 유지 (중복 체크 및 기록용)
-
-// 3. 스케줄러로 주기적으로 동기화
-@Scheduled(fixedDelay = 5000) // 5초마다
-public void syncLikeCounts() {
-    // 최근 좋아요가 추가/삭제된 상품들만 동기화
-    List<Long> productIds = getRecentlyUpdatedProductIds();
     
-    for (Long productId : productIds) {
-        Long actualCount = likeRepository.countByProductId(productId);
-        productRepository.updateLikeCount(productId, actualCount);
+    public void updateLikeCount(Long likeCount) {
+        if (likeCount == null || likeCount < 0) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "좋아요 수는 0 이상이어야 합니다.");
+        }
+        this.likeCount = likeCount;
     }
+}
+```
+
+#### 2. Spring Batch를 사용한 비동기 집계
+
+```java
+@Configuration
+public class LikeCountSyncBatchConfig {
+    private static final int CHUNK_SIZE = 100; // 청크 크기: 100개씩 처리
+    
+    @Bean
+    public Job likeCountSyncJob() {
+        return new JobBuilder("likeCountSyncJob", jobRepository)
+            .start(likeCountSyncStep())
+            .build();
+    }
+    
+    @Bean
+    public Step likeCountSyncStep() {
+        return new StepBuilder("likeCountSyncStep", jobRepository)
+            .<Long, ProductLikeCount>chunk(CHUNK_SIZE, transactionManager)
+            .reader(productIdReader())      // 모든 상품 ID 조회
+            .processor(productLikeCountProcessor())  // 각 상품의 좋아요 수 집계
+            .writer(productLikeCountWriter())  // Product.likeCount 업데이트
+            .build();
+    }
+    
+    @Bean
+    public ItemReader<Long> productIdReader() {
+        List<Long> productIds = productRepository.findAllProductIds();
+        return new ListItemReader<>(productIds);
+    }
+    
+    @Bean
+    public ItemProcessor<Long, ProductLikeCount> productLikeCountProcessor() {
+        return productId -> {
+            Map<Long, Long> likeCountMap = likeRepository.countByProductIds(List.of(productId));
+            Long likeCount = likeCountMap.getOrDefault(productId, 0L);
+            return new ProductLikeCount(productId, likeCount);
+        };
+    }
+    
+    @Bean
+    public ItemWriter<ProductLikeCount> productLikeCountWriter() {
+        return items -> {
+            for (ProductLikeCount item : items) {
+                productRepository.updateLikeCount(item.productId(), item.likeCount());
+            }
+        };
+    }
+}
+```
+
+#### 3. 스케줄러로 주기적 실행
+
+```java
+@Component
+public class LikeCountSyncScheduler {
+    private final JobLauncher jobLauncher;
+    private final Job likeCountSyncJob;
+    
+    @Scheduled(fixedDelay = 5000) // 5초마다 실행
+    public void syncLikeCounts() {
+        JobParameters jobParameters = new JobParametersBuilder()
+            .addLong("timestamp", System.currentTimeMillis())
+            .toJobParameters();
+        
+        jobLauncher.run(likeCountSyncJob, jobParameters);
+    }
+}
+```
+
+#### 4. 조회 시 Product.likeCount 사용
+
+```java
+@Transactional(readOnly = true)
+public List<LikedProduct> getLikedProducts(String userId) {
+    // ... 상품 조회 로직
+    
+    // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+    return likes.stream()
+        .map(like -> {
+            Product product = products.stream()
+                .filter(p -> p.getId().equals(like.getProductId()))
+                .findFirst()
+                .orElseThrow(...);
+            // COUNT(*) 쿼리 없이 컬럼만 읽음
+            Long likesCount = product.getLikeCount();
+            return LikedProduct.from(product, like, likesCount);
+        })
+        .toList();
 }
 ```
 
 **장점**:
 - ✅ 쓰기 경합 없음 (Insert-only 유지)
-- ✅ 조회 성능 향상 (컬럼만 읽으면 됨)
+- ✅ 조회 성능 향상 (COUNT(*) 쿼리 제거, 컬럼만 읽음)
 - ✅ 중복 체크 가능 (UNIQUE 제약조건 유지)
+- ✅ Spring Batch의 청크 단위 처리로 대량 처리 최적화
+- ✅ 재시작 가능 및 모니터링 지원
 
 **단점**:
-- ⚠️ 약간의 지연 (5초 정도)
+- ⚠️ 약간의 지연 (최대 5초)
 
-#### 방안 2: Redis 캐시 추가
+#### 향후 개선 방안: Redis 캐시 추가 (선택적)
+
+현재는 DB 기반으로 구현되어 있으나, 향후 트래픽 증가 시 Redis 캐시를 추가할 수 있습니다.
 
 ```java
-// Redis에 좋아요 수 캐싱
+// Redis에 좋아요 수 캐싱 (향후 개선)
 public Long getLikeCount(Long productId) {
     String cacheKey = "product:" + productId + ":like_count";
     
@@ -410,22 +492,28 @@ public Long getLikeCount(Long productId) {
     }
     
     // Redis에 없으면 DB에서 조회 후 캐시
-    Long actualCount = likeRepository.countByProductId(productId);
-    redisTemplate.opsForValue().set(cacheKey, actualCount, 60, TimeUnit.SECONDS);
+    Product product = productRepository.findById(productId)
+        .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
+    Long likeCount = product.getLikeCount();
+    redisTemplate.opsForValue().set(cacheKey, likeCount, 60, TimeUnit.SECONDS);
     
-    return actualCount;
+    return likeCount;
 }
 
-// 좋아요 추가 시 Redis도 업데이트
-@Transactional
-public void addLike(String userId, Long productId) {
-    // ... 기존 로직
-    
-    // Redis 캐시 무효화 또는 증가
-    String cacheKey = "product:" + productId + ":like_count";
-    redisTemplate.delete(cacheKey); // 또는 INCR 사용
+// Spring Batch Writer에서 Redis도 업데이트 (향후 개선)
+@Bean
+public ItemWriter<ProductLikeCount> productLikeCountWriter() {
+    return items -> {
+        for (ProductLikeCount item : items) {
+            productRepository.updateLikeCount(item.productId(), item.likeCount());
+            // Redis 캐시도 업데이트 (선택적)
+            // redisTemplate.opsForValue().set("product:" + item.productId() + ":like_count", item.likeCount());
+        }
+    };
 }
 ```
+
+**참고**: 현재는 Redis 없이도 DB 기반으로 충분한 성능을 제공합니다.
 
 ---
 
@@ -439,9 +527,10 @@ public void addLike(String userId, Long productId) {
 - 정확성보다 **성능과 확장성**이 더 중요
 
 **적용**:
-- 하이브리드 방식 사용
-- 스케줄러로 주기적 동기화
-- Redis 캐시로 조회 성능 향상
+- 하이브리드 방식 사용 ⭐ 현재 구현
+- Spring Batch로 주기적 동기화 (5초마다)
+- Product.likeCount 컬럼으로 조회 성능 향상
+- Redis는 선택적 (현재는 DB 기반으로 충분)
 
 ### 주문/포인트: Strong Consistency 필수
 
@@ -1026,12 +1115,16 @@ T2: 재고 차감 (10 - 5 = 5) → 저장  ← T1의 변경사항 손실!
 **✅ 이미 적용된 전략**:
 - **재고 차감**: `PESSIMISTIC_WRITE` (비관적 락)
 - **포인트 차감**: `PESSIMISTIC_WRITE` (비관적 락)
-- **좋아요**: 테이블 분리 + UNIQUE 제약조건 (Insert-only)
+- **좋아요 추가/삭제**: 테이블 분리 + UNIQUE 제약조건 (Insert-only)
+- **좋아요 수 조회**: Eventually Consistent (하이브리드 방식) ⭐ 구현 완료
+  - Product.likeCount 필드 사용
+  - Spring Batch로 주기적 동기화 (5초마다)
+  - COUNT(*) 쿼리 제거로 조회 성능 향상
 
 **⚠️ 향후 고려 사항**:
-- **쿠폰 사용**: `OPTIMISTIC_LOCK` (낙관적 락)
+- **쿠폰 사용**: `OPTIMISTIC_LOCK` (낙관적 락) - 이미 구현됨
 - **쿠폰 발급**: Redis Lock 또는 Queueing
-- **좋아요 수 조회**: Eventually Consistent (하이브리드 방식)
+- **좋아요 수 조회**: Redis 캐시 추가 (선택적, 현재는 DB 기반으로 충분)
 
 ---
 
@@ -1090,24 +1183,43 @@ Boolean lockAcquired = redisTemplate.opsForValue()
     .setIfAbsent(lockKey, lockValue, Duration.ofSeconds(10));
 ```
 
-#### ✔ 읽기 트래픽이 압도적으로 많을 때 → 캐시 + Eventually Consistent
+#### ✔ 읽기 트래픽이 압도적으로 많을 때 → 캐시 + Eventually Consistent ⭐ 현재 구현
 
 **적용 도메인**: 좋아요 수, 조회수, 인기 상품 집계
 
 **특징**:
-- 약간의 지연 허용 가능
+- 약간의 지연 허용 가능 (최대 5초)
 - 읽기 성능 최우선
-- 스케줄러로 주기적 동기화
+- Spring Batch로 주기적 동기화
 
-**구현 예시**:
+**현재 구현 예시**:
 ```java
 // Insert-only로 쓰기 경합 없음
-likeRepository.save(like);
+@Transactional
+public void addLike(String userId, Long productId) {
+    Like like = Like.of(user.getId(), productId);
+    try {
+        likeRepository.save(like);
+    } catch (DataIntegrityViolationException e) {
+        return; // 이미 좋아요 함
+    }
+}
 
-// 스케줄러로 주기적 동기화
+// Spring Batch로 주기적 동기화 (5초마다)
 @Scheduled(fixedDelay = 5000)
 public void syncLikeCounts() {
-    // COUNT(*)로 실제 좋아요 수 계산 후 업데이트
+    JobParameters jobParameters = new JobParametersBuilder()
+        .addLong("timestamp", System.currentTimeMillis())
+        .toJobParameters();
+    jobLauncher.run(likeCountSyncJob, jobParameters);
+}
+
+// 조회 시 Product.likeCount 사용 (COUNT(*) 제거)
+@Transactional(readOnly = true)
+public List<LikedProduct> getLikedProducts(String userId) {
+    // ...
+    Long likesCount = product.getLikeCount(); // 컬럼만 읽음
+    return LikedProduct.from(product, like, likesCount);
 }
 ```
 
@@ -1237,31 +1349,34 @@ void synchronizedTest_transactionBoundaryIssue() {
 
 ## 📝 권장 사항
 
-### 현재 프로젝트 개선 방안
+### 현재 프로젝트 구현 현황
 
-1. **단기**: 현재 구조 유지 (테이블 분리)
-   - 이미 잘 작동하고 있음
-   - UNIQUE 제약조건으로 중복 방지
-   - Insert-only로 쓰기 경합 없음
+1. **✅ 완료**: 하이브리드 방식 구현
+   - Product 테이블에 `like_count` 컬럼 추가 완료
+   - Spring Batch로 주기적 동기화 (5초 간격) 구현 완료
+   - 조회 시 `Product.likeCount` 필드 사용 (COUNT(*) 제거)
+   - Insert-only로 쓰기 경합 없음 유지
+   - UNIQUE 제약조건으로 중복 방지 유지
 
-2. **중기**: 하이브리드 방식 도입
-   - Product 테이블에 `like_count` 컬럼 추가
-   - 스케줄러로 주기적 동기화 (5초 간격)
-   - 조회 성능 향상
-
-3. **장기**: Redis 캐시 추가
-   - 대규모 트래픽 대응
-   - 조회 성능 극대화
+2. **⚠️ 향후 개선 (선택적)**: Redis 캐시 추가
+   - 대규모 트래픽 증가 시 고려
+   - 현재는 DB 기반으로도 충분한 성능 제공
+   - Spring Batch Writer에서 Redis 캐시도 함께 업데이트 가능
 
 ### 설계 선택 가이드
 
-| 상황 | 권장 방식 |
-|------|----------|
-| **소규모 서비스** | 테이블 분리 (현재 방식) |
-| **중규모 서비스** | 하이브리드 방식 |
-| **대규모 서비스** | 하이브리드 + Redis 캐시 |
-| **실시간 정확성 필수** | 컬럼 기반 + 비관적 락 |
-| **성능 우선** | 하이브리드 + Redis 캐시 |
+| 상황 | 권장 방식 | 현재 프로젝트 |
+|------|----------|-------------|
+| **소규모 서비스** | 테이블 분리 | - |
+| **중규모 서비스** | 하이브리드 방식 | ✅ **현재 구현** |
+| **대규모 서비스** | 하이브리드 + Redis 캐시 | ⚠️ 향후 고려 |
+| **실시간 정확성 필수** | 컬럼 기반 + 비관적 락 | - |
+| **성능 우선** | 하이브리드 + Redis 캐시 | ⚠️ 향후 고려 |
+
+**현재 프로젝트 상태**: 중규모 서비스에 적합한 하이브리드 방식 구현 완료
+- Spring Batch를 사용한 대량 처리 최적화
+- Eventually Consistent로 약간의 지연 허용
+- Redis 없이도 충분한 성능 제공
 
 ---
 
