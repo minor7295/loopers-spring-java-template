@@ -41,6 +41,23 @@ public class LikeFacade {
      * <p>
      * 멱등성을 보장합니다. 이미 좋아요가 존재하는 경우 아무 작업도 수행하지 않습니다.
      * </p>
+     * <p>
+     * <b>동시성 제어 전략:</b>
+     * <ul>
+     *   <li><b>UNIQUE 제약조건 사용:</b> 데이터베이스 레벨에서 중복 삽입을 물리적으로 방지</li>
+     *   <li><b>애플리케이션 레벨 한계:</b> 애플리케이션 레벨로는 race condition을 완전히 방지할 수 없음</li>
+     *   <li><b>예외 처리:</b> UNIQUE 제약조건 위반 시 DataIntegrityViolationException 처리하여 멱등성 보장</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>DBA 설득 근거 (유니크 인덱스 사용):</b>
+     * <ul>
+     *   <li><b>트래픽 패턴:</b> 좋아요는 고 QPS write-heavy 테이블이 아니며, 전체 서비스에서 차지하는 비중이 낮음</li>
+     *   <li><b>애플리케이션 레벨 한계:</b> 동일 시점 동시 요청 시 select 시점엔 중복 없음 → insert 2번 발생 가능</li>
+     *   <li><b>데이터 무결성:</b> DB만이 강한 무결성(Strong Consistency)을 제공할 수 있음</li>
+     *   <li><b>비즈니스 데이터 보호:</b> 중복 좋아요로 인한 비즈니스 데이터 오염 방지</li>
+     * </ul>
+     * </p>
      *
      * @param userId 사용자 ID (String)
      * @param productId 상품 ID
@@ -52,12 +69,15 @@ public class LikeFacade {
         loadProduct(productId);
 
         // 먼저 일반 조회로 중복 체크 (대부분의 경우 빠르게 처리)
+        // ⚠️ 주의: 애플리케이션 레벨 체크만으로는 race condition을 완전히 방지할 수 없음
+        // 동시에 두 요청이 들어오면 둘 다 "없음"으로 판단 → 둘 다 저장 시도 가능
         Optional<Like> existingLike = likeRepository.findByUserIdAndProductId(user.getId(), productId);
         if (existingLike.isPresent()) {
             return;
         }
 
         // 저장 시도 (동시성 상황에서는 UNIQUE 제약조건 위반 예외 발생 가능)
+        // ✅ UNIQUE 제약조건이 최종 보호: DB 레벨에서 중복 삽입을 물리적으로 방지
         Like like = Like.of(user.getId(), productId);
         try {
             likeRepository.save(like);

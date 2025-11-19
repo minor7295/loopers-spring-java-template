@@ -51,22 +51,32 @@ public class PurchasingFacade {
      * 1. 사용자 조회 및 존재 여부 검증<br>
      * 2. 상품 재고 검증 및 차감<br>
      * 3. 사용자 포인트 검증 및 차감<br>
-     * 4. 주문 저장 및 외부 시스템 알림
+     * 4. 주문 저장
      * </p>
      * <p>
      * <b>동시성 제어 전략:</b>
      * <ul>
      *   <li><b>PESSIMISTIC_WRITE 사용 근거:</b> Lost Update 방지 및 데이터 일관성 보장</li>
-     *   <li><b>포인트 차감:</b> 동시 주문 시 포인트 중복 차감 방지</li>
-     *   <li><b>재고 차감:</b> 동시 주문 시 재고 음수 방지 및 정확한 차감 보장</li>
+     *   <li><b>포인트 차감:</b> 동시 주문 시 포인트 중복 차감 방지 (금전적 손실 방지)</li>
+     *   <li><b>재고 차감:</b> 동시 주문 시 재고 음수 방지 및 정확한 차감 보장 (재고 oversell 방지)</li>
      *   <li><b>Lock 범위 최소화:</b> PK/UNIQUE 인덱스 기반 조회로 Lock 범위 최소화</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>DBA 설득 근거 (비관적 락 사용):</b>
+     * <ul>
+     *   <li><b>제한적 사용:</b> 전역이 아닌 금전적 손실 위험이 있는 특정 도메인에만 사용</li>
+     *   <li><b>트랜잭션 최소화:</b> 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음 (몇 ms)</li>
+     *   <li><b>Lock 범위 최소화:</b> PK/UNIQUE 인덱스 기반 조회로 해당 행만 락 (Record Lock)</li>
+     *   <li><b>애플리케이션 레벨 한계:</b> 애플리케이션 레벨로는 race condition을 완전히 방지할 수 없어서 DB 차원의 strong consistency 필요</li>
+     *   <li><b>낙관적 락 기본 전략:</b> 쿠폰 사용은 낙관적 락 사용 (Hot Spot 대응)</li>
      * </ul>
      * </p>
      * <p>
      * <b>Lock 생명주기:</b>
      * <ol>
      *   <li>SELECT ... FOR UPDATE 실행 시 락 획득</li>
-     *   <li>트랜잭션 내에서 락 유지</li>
+     *   <li>트랜잭션 내에서 락 유지 (외부 I/O 없음, 매우 짧은 시간)</li>
      *   <li>트랜잭션 커밋/롤백 시 락 자동 해제</li>
      * </ol>
      * </p>
@@ -82,8 +92,9 @@ public class PurchasingFacade {
         }
 
         // 비관적 락을 사용하여 사용자 조회 (포인트 차감 시 동시성 제어)
-        // - userId는 UNIQUE 인덱스가 있어 Lock 범위 최소화
-        // - Lost Update 방지: 동시 주문 시 포인트 중복 차감 방지
+        // - userId는 UNIQUE 인덱스가 있어 Lock 범위 최소화 (Record Lock만 적용)
+        // - Lost Update 방지: 동시 주문 시 포인트 중복 차감 방지 (금전적 손실 방지)
+        // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
         User user = loadUserForUpdate(userId);
 
         Set<Long> productIds = new HashSet<>();
@@ -97,8 +108,9 @@ public class PurchasingFacade {
             }
 
             // 비관적 락을 사용하여 상품 조회 (재고 차감 시 동시성 제어)
-            // - id는 PK 인덱스가 있어 Lock 범위 최소화
-            // - Lost Update 방지: 동시 주문 시 재고 음수 방지 및 정확한 차감 보장
+            // - id는 PK 인덱스가 있어 Lock 범위 최소화 (Record Lock만 적용)
+            // - Lost Update 방지: 동시 주문 시 재고 음수 방지 및 정확한 차감 보장 (재고 oversell 방지)
+            // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
             Product product = productRepository.findByIdForUpdate(command.productId())
                 .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
                     String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", command.productId())));
