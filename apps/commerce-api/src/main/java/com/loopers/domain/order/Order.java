@@ -59,8 +59,10 @@ public class Order extends BaseEntity {
         validateUserId(userId);
         validateItems(items);
         this.userId = userId;
-        this.items = items;
-        Integer subtotal = calculateTotalAmount(items);
+        // ✅ 방어적 복사로 불변 리스트 생성 (총액과 아이템의 일관성 보장)
+        List<OrderItem> immutableItems = List.copyOf(items);
+        this.items = immutableItems;
+        Integer subtotal = calculateTotalAmount(immutableItems);
         this.discountAmount = discountAmount != null ? discountAmount : 0;
         this.totalAmount = Math.max(0, subtotal - this.discountAmount);
         this.couponCode = couponCode;
