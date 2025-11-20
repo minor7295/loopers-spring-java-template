@@ -78,6 +78,34 @@ class PurchasingFacadeTest {
         return productRepository.save(product);
     }
 
+    /**
+     * 쿠폰을 생성하고 저장합니다.
+     *
+     * @param code 쿠폰 코드
+     * @param type 쿠폰 타입
+     * @param discountValue 할인 값
+     * @return 저장된 쿠폰
+     */
+    private Coupon createAndSaveCoupon(String code, CouponType type, Integer discountValue) {
+        Coupon coupon = Coupon.of(code, type, discountValue);
+        return couponRepository.save(coupon);
+    }
+
+    /**
+     * 사용자 쿠폰을 생성하고 저장합니다.
+     * <p>
+     * 쿠폰은 이미 저장된 상태여야 합니다.
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param coupon 저장된 쿠폰
+     * @return 저장된 사용자 쿠폰
+     */
+    private UserCoupon createAndSaveUserCoupon(Long userId, Coupon coupon) {
+        UserCoupon userCoupon = UserCoupon.of(userId, coupon);
+        return userCouponRepository.save(userCoupon);
+    }
+
     @Test
     @DisplayName("주문 생성 시 재고 차감, 포인트 차감, 주문 완료, 외부 전송을 수행한다")
     void createOrder_successFlow() {
@@ -416,10 +444,8 @@ class PurchasingFacadeTest {
         Brand brand = createAndSaveBrand("브랜드");
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
-        Coupon coupon = Coupon.of("FIXED5000", CouponType.FIXED_AMOUNT, 5_000);
-        couponRepository.save(coupon);
-        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
-        userCouponRepository.save(userCoupon);
+        Coupon coupon = createAndSaveCoupon("FIXED5000", CouponType.FIXED_AMOUNT, 5_000);
+        createAndSaveUserCoupon(user.getId(), coupon);
 
         List<OrderItemCommand> commands = List.of(
             new OrderItemCommand(product.getId(), 1, "FIXED5000")
@@ -447,10 +473,8 @@ class PurchasingFacadeTest {
         Brand brand = createAndSaveBrand("브랜드");
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
-        Coupon coupon = Coupon.of("PERCENT20", CouponType.PERCENTAGE, 20);
-        couponRepository.save(coupon);
-        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
-        userCouponRepository.save(userCoupon);
+        Coupon coupon = createAndSaveCoupon("PERCENT20", CouponType.PERCENTAGE, 20);
+        createAndSaveUserCoupon(user.getId(), coupon);
 
         List<OrderItemCommand> commands = List.of(
             new OrderItemCommand(product.getId(), 1, "PERCENT20")
@@ -520,9 +544,8 @@ class PurchasingFacadeTest {
         Brand brand = createAndSaveBrand("브랜드");
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
-        Coupon coupon = Coupon.of("USED_COUPON", CouponType.FIXED_AMOUNT, 5_000);
-        couponRepository.save(coupon);
-        UserCoupon userCoupon = UserCoupon.of(user.getId(), coupon);
+        Coupon coupon = createAndSaveCoupon("USED_COUPON", CouponType.FIXED_AMOUNT, 5_000);
+        UserCoupon userCoupon = createAndSaveUserCoupon(user.getId(), coupon);
         userCoupon.use(); // 이미 사용 처리
         userCouponRepository.save(userCoupon);
 

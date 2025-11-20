@@ -144,10 +144,10 @@ public class Order extends BaseEntity {
     /**
      * 주문을 취소 상태로 변경합니다.
      * 상태 변경만 수행하며, 포인트 환불은 도메인 서비스에서 처리합니다.
-     * PENDING 상태의 주문만 취소할 수 있습니다.
+     * PENDING 또는 COMPLETED 상태의 주문만 취소할 수 있습니다.
      */
     public void cancel() {
-        if (this.status != OrderStatus.PENDING) {
+        if (this.status != OrderStatus.PENDING && this.status != OrderStatus.COMPLETED) {
             throw new CoreException(ErrorType.BAD_REQUEST,
                 String.format("취소할 수 없는 주문 상태입니다. (현재 상태: %s)", this.status));
         }
