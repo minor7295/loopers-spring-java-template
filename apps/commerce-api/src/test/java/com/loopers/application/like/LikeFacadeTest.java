@@ -155,8 +155,9 @@ class LikeFacadeTest {
         Product product2 = createMockProduct(productId2, "상품2", 20000, 20, 1L, 3L);
         
         when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
-        when(productRepository.findById(productId1)).thenReturn(Optional.of(product1));
-        when(productRepository.findById(productId2)).thenReturn(Optional.of(product2));
+        // ✅ findAllById를 사용하므로 findAllById를 mock해야 함
+        when(productRepository.findAllById(List.of(productId1, productId2)))
+            .thenReturn(List.of(product1, product2));
         
         // act
         List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
@@ -199,8 +200,10 @@ class LikeFacadeTest {
         Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
         
         when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
-        when(productRepository.findById(productId1)).thenReturn(Optional.of(product1));
-        when(productRepository.findById(nonExistentProductId)).thenReturn(Optional.empty());
+        // ✅ findAllById를 사용하므로 findAllById를 mock해야 함
+        // nonExistentProductId가 포함되지 않아서 예외가 발생해야 함
+        when(productRepository.findAllById(List.of(productId1, nonExistentProductId)))
+            .thenReturn(List.of(product1)); // product1만 반환 (nonExistentProductId는 없음)
         
         // act & assert
         assertThatThrownBy(() -> likeFacade.getLikedProducts(DEFAULT_USER_ID))

@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Import;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -74,6 +75,22 @@ class LikeFacadeConcurrencyTest {
     private Product createAndSaveProduct(String productName, int price, int stock, Long brandId) {
         Product product = Product.of(productName, price, stock, brandId);
         return productRepository.save(product);
+    }
+
+    /**
+     * 상품들의 좋아요 수를 동기화합니다.
+     * <p>
+     * 테스트에서 비동기 스케줄러를 기다리지 않고 직접 like count를 업데이트하기 위해 사용합니다.
+     * </p>
+     *
+     * @param productIds 동기화할 상품 ID 목록
+     */
+    private void syncLikeCounts(List<Long> productIds) {
+        Map<Long, Long> likeCountMap = likeRepository.countByProductIds(productIds);
+        for (Long productId : productIds) {
+            Long likeCount = likeCountMap.getOrDefault(productId, 0L);
+            productRepository.updateLikeCount(productId, likeCount);
+        }
     }
 
     @Test
@@ -273,6 +290,9 @@ class LikeFacadeConcurrencyTest {
         latch.await();
         executorService.shutdown();
         
+        // 좋아요 수 동기화 (비동기 스케줄러를 기다리지 않고 직접 업데이트)
+        syncLikeCounts(List.of(product1.getId(), product2.getId()));
+        
         // assert
         // @Transactional(readOnly = true)가 있으면:
         // - 모든 조회가 동일한 트랜잭션 내에서 실행되어 일관된 스냅샷을 봄
@@ -287,27 +307,30 @@ class LikeFacadeConcurrencyTest {
         assertThat(allResults).hasSize(10);
         
         // 각 조회 결과가 올바른 형식인지 확인
+        // 참고: allResults는 동기화 이전에 조회된 결과이므로 likesCount가 0일 수 있습니다.
+        // 이 테스트는 @Transactional(readOnly = true)의 일관성 보장을 검증하는 것이 목적이므로,
+        // 동시성 테스트 중 조회된 결과의 상품 ID 일관성만 확인합니다.
         for (List<LikeFacade.LikedProduct> result : allResults) {
             // user1의 좋아요 목록에는 상품1, 상품2가 포함되어야 함
-            List<Long> productIds = result.stream()
+            List<Long> resultProductIds = result.stream()
                 .map(LikeFacade.LikedProduct::productId)
                 .sorted()
                 .toList();
-            assertThat(productIds).contains(product1.getId(), product2.getId());
-            
-            // 각 상품의 좋아요 수가 0보다 커야 함
-            for (LikeFacade.LikedProduct likedProduct : result) {
-                assertThat(likedProduct.likesCount()).isGreaterThan(0);
-            }
+            assertThat(resultProductIds).contains(product1.getId(), product2.getId());
         }
         
-        // 최종 상태 확인
+        // 최종 상태 확인 (동기화 후)
         List<LikeFacade.LikedProduct> finalResult = likeFacade.getLikedProducts(userId1);
         List<Long> finalProductIds = finalResult.stream()
             .map(LikeFacade.LikedProduct::productId)
             .sorted()
             .toList();
         assertThat(finalProductIds).containsExactlyInAnyOrder(product1.getId(), product2.getId());
+        
+        // 동기화 후에는 정확한 좋아요 수가 반영되어야 함
+        for (LikeFacade.LikedProduct likedProduct : finalResult) {
+            assertThat(likedProduct.likesCount()).isGreaterThan(0);
+        }
     }
 }
 
