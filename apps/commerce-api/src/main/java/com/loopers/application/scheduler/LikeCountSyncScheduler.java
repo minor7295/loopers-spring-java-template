@@ -8,6 +8,7 @@ import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.repository.JobRestartException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -36,6 +37,13 @@ import org.springframework.stereotype.Component;
  *   <li><b>확장성:</b> Redis 없이도 대규모 트래픽 처리 가능</li>
  * </ul>
  * </p>
+ * <p>
+ * <b>비활성화 조건:</b>
+ * <ul>
+ *   <li><b>데이터 시딩 중:</b> {@code data.seeding.enabled=true}일 때는 스케줄러가 비활성화됩니다.</li>
+ *   <li>데이터 시딩 중에는 EntityManagerFactory가 닫히기 전에 스케줄러가 실행되면 오류가 발생할 수 있습니다.</li>
+ * </ul>
+ * </p>
  *
  * @author Loopers
  * @version 1.0
@@ -43,6 +51,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @RequiredArgsConstructor
 @Component
+@ConditionalOnProperty(name = "data.seeding.enabled", havingValue = "false", matchIfMissing = true)
 public class LikeCountSyncScheduler {
 
     private final JobLauncher jobLauncher;

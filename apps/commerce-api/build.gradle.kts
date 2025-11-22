@@ -14,6 +14,9 @@ dependencies {
     // batch
     implementation("org.springframework.boot:spring-boot-starter-batch")
 
+    // faker
+    implementation("net.datafaker:datafaker:2.0.2")
+
     // querydsl
     annotationProcessor("com.querydsl:querydsl-apt::jakarta")
     annotationProcessor("jakarta.persistence:jakarta.persistence-api")
@@ -22,4 +25,13 @@ dependencies {
     // test-fixtures
     testImplementation(testFixtures(project(":modules:jpa")))
     testImplementation(testFixtures(project(":modules:redis")))
+}
+
+// 데이터 시딩 실행을 위한 task
+tasks.register<JavaExec>("runSeeding") {
+    group = "application"
+    description = "데이터 시딩 실행 (웹 서버 없이)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.loopers.infrastructure.seeding.DataSeedingApplication")
+    systemProperty("spring.main.web-application-type", "none")
 }

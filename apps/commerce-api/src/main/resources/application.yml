@@ -34,6 +34,18 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+# 데이터 시딩 설정 (Faker 기반)
+data:
+  seeding:
+    enabled: false # true로 설정하면 애플리케이션 시작 시 자동으로 데이터 생성
+    faker-locale: ko # Faker 로케일 (ko, en 등)
+    user-count: 10000 # 생성할 사용자 수
+    brand-count: 100 # 생성할 브랜드 수
+    product-count: 100000 # 생성할 상품 수
+    likes-per-user: 50 # 사용자당 평균 좋아요 수
+    order-count: 50000 # 생성할 주문 수
+    batch-size: 1000 # 배치 크기 (한 번에 저장할 엔티티 수)
+
 ---
 spring:
   config:
