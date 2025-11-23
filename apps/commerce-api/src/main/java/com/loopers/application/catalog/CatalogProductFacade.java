@@ -33,7 +33,7 @@ public class CatalogProductFacade {
     /**
      * 상품 목록을 조회합니다.
      * <p>
-     * Redis 캐시를 먼저 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
+     * 첫 페이지(page=0)인 경우에만 Redis 캐시를 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
      * 배치 조회를 통해 N+1 쿼리 문제를 해결합니다.
      * </p>
      *
@@ -44,7 +44,7 @@ public class CatalogProductFacade {
      * @return 상품 목록 조회 결과
      */
     public ProductInfoList getProducts(Long brandId, String sort, int page, int size) {
-        // 캐시에서 조회 시도
+        // 첫 페이지인 경우에만 캐시에서 조회 시도
         ProductInfoList cachedResult = productCacheService.getCachedProductList(brandId, sort, page, size);
         if (cachedResult != null) {
             return cachedResult;
@@ -56,6 +56,7 @@ public class CatalogProductFacade {
         
         if (products.isEmpty()) {
             ProductInfoList emptyResult = new ProductInfoList(List.of(), totalCount, page, size);
+            // 첫 페이지인 경우에만 캐시 저장
             productCacheService.cacheProductList(brandId, sort, page, size, emptyResult);
             return emptyResult;
         }
@@ -87,7 +88,7 @@ public class CatalogProductFacade {
         
         ProductInfoList result = new ProductInfoList(productsInfo, totalCount, page, size);
         
-        // 캐시에 저장
+        // 첫 페이지인 경우에만 캐시 저장
         productCacheService.cacheProductList(brandId, sort, page, size, result);
         
         return result;

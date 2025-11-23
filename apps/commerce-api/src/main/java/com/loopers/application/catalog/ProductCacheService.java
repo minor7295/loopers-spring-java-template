@@ -15,6 +15,13 @@ import java.util.Set;
  * <p>
  * 상품 목록 조회와 상품 상세 조회 결과를 캐시하여 성능을 향상시킵니다.
  * </p>
+ * <p>
+ * <b>캐시 전략:</b>
+ * <ul>
+ *   <li><b>상품 목록:</b> 첫 페이지(page=0)만 캐시하여 메모리 사용량 최적화</li>
+ *   <li><b>상품 상세:</b> 모든 상품 상세 정보 캐시</li>
+ * </ul>
+ * </p>
  *
  * @author Loopers
  */
@@ -33,14 +40,22 @@ public class ProductCacheService {
 
     /**
      * 상품 목록 조회 결과를 캐시에서 조회합니다.
+     * <p>
+     * 첫 페이지(page=0)인 경우에만 캐시에서 조회합니다.
+     * </p>
      *
      * @param brandId 브랜드 ID (null이면 전체)
      * @param sort 정렬 기준
      * @param page 페이지 번호
      * @param size 페이지당 상품 수
-     * @return 캐시된 상품 목록 (없으면 null)
+     * @return 캐시된 상품 목록 (없거나 첫 페이지가 아니면 null)
      */
     public ProductInfoList getCachedProductList(Long brandId, String sort, int page, int size) {
+        // 첫 페이지가 아니면 캐시 조회하지 않음
+        if (page != 0) {
+            return null;
+        }
+        
         try {
             String key = buildListCacheKey(brandId, sort, page, size);
             String cachedValue = redisTemplate.opsForValue().get(key);
@@ -59,6 +74,9 @@ public class ProductCacheService {
 
     /**
      * 상품 목록 조회 결과를 캐시에 저장합니다.
+     * <p>
+     * 첫 페이지(page=0)인 경우에만 캐시에 저장합니다.
+     * </p>
      *
      * @param brandId 브랜드 ID (null이면 전체)
      * @param sort 정렬 기준
@@ -67,6 +85,11 @@ public class ProductCacheService {
      * @param productInfoList 캐시할 상품 목록
      */
     public void cacheProductList(Long brandId, String sort, int page, int size, ProductInfoList productInfoList) {
+        // 첫 페이지가 아니면 캐시 저장하지 않음
+        if (page != 0) {
+            return;
+        }
+        
         try {
             String key = buildListCacheKey(brandId, sort, page, size);
             String value = objectMapper.writeValueAsString(productInfoList);
