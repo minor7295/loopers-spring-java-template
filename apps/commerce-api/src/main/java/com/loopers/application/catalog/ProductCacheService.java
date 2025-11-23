@@ -2,13 +2,15 @@ package com.loopers.application.catalog;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.util.Set;
+import java.util.Collections;
 
 /**
  * 상품 조회 결과를 Redis에 캐시하는 서비스.
@@ -27,7 +29,6 @@ import java.util.Set;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ProductCacheService {
 
     private static final String CACHE_KEY_PREFIX_LIST = "product:list:";
@@ -37,6 +38,27 @@ public class ProductCacheService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final DefaultRedisScript<Long> evictByPatternScript;
+
+    /**
+     * Lua 스크립트를 사용한 캐시 무효화를 위한 생성자.
+     * <p>
+     * SCAN 기반 패턴 매칭으로 KEYS 명령어의 블로킹 문제를 해결합니다.
+     * </p>
+     */
+    public ProductCacheService(
+            RedisTemplate<String, String> redisTemplate,
+            ObjectMapper objectMapper
+    ) {
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
+        
+        // Lua 스크립트 로드
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptSource(new ResourceScriptSource(new ClassPathResource("lua/evict-by-pattern.lua")));
+        script.setResultType(Long.class);
+        this.evictByPatternScript = script;
+    }
 
     /**
      * 상품 목록 조회 결과를 캐시에서 조회합니다.
@@ -161,15 +183,24 @@ public class ProductCacheService {
 
     /**
      * 특정 브랜드의 상품 목록 캐시를 무효화합니다.
+     * <p>
+     * Lua 스크립트를 사용하여 SCAN 기반으로 패턴 매칭 및 삭제를 수행합니다.
+     * KEYS 명령어 대신 SCAN을 사용하여 Redis 블로킹을 방지합니다.
+     * </p>
      *
      * @param brandId 브랜드 ID
      */
     public void evictProductListCacheByBrand(Long brandId) {
         try {
-            Set<String> keys = redisTemplate.keys(CACHE_KEY_PREFIX_LIST + "brand:" + brandId + ":*");
-            if (keys != null && !keys.isEmpty()) {
-                redisTemplate.delete(keys);
-                log.debug("브랜드별 상품 목록 캐시 무효화 완료: brandId={}, count={}", brandId, keys.size());
+            String pattern = CACHE_KEY_PREFIX_LIST + "brand:" + brandId + ":*";
+            Long deletedCount = redisTemplate.execute(
+                evictByPatternScript,
+                Collections.emptyList(),
+                pattern
+            );
+            
+            if (deletedCount != null && deletedCount > 0) {
+                log.debug("브랜드별 상품 목록 캐시 무효화 완료: brandId={}, count={}", brandId, deletedCount);
             }
         } catch (Exception e) {
             log.warn("브랜드별 상품 목록 캐시 무효화 실패: brandId={}", brandId, e);
@@ -178,13 +209,21 @@ public class ProductCacheService {
 
     /**
      * 모든 상품 목록 캐시를 무효화합니다.
+     * <p>
+     * Lua 스크립트를 사용하여 SCAN 기반으로 패턴 매칭 및 삭제를 수행합니다.
+     * KEYS 명령어 대신 SCAN을 사용하여 Redis 블로킹을 방지합니다.
+     * </p>
      */
     public void evictAllProductListCache() {
         try {
-            Set<String> keys = redisTemplate.keys(CACHE_KEY_PATTERN_LIST);
-            if (keys != null && !keys.isEmpty()) {
-                redisTemplate.delete(keys);
-                log.debug("모든 상품 목록 캐시 무효화 완료: count={}", keys.size());
+            Long deletedCount = redisTemplate.execute(
+                evictByPatternScript,
+                Collections.emptyList(),
+                CACHE_KEY_PATTERN_LIST
+            );
+            
+            if (deletedCount != null && deletedCount > 0) {
+                log.debug("모든 상품 목록 캐시 무효화 완료: count={}", deletedCount);
             }
         } catch (Exception e) {
             log.warn("상품 목록 캐시 무효화 실패", e);
