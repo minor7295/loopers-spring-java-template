@@ -19,7 +19,8 @@ import java.util.TimeZone;
             type = FilterType.ASSIGNABLE_TYPE,
             classes = {
                 com.loopers.infrastructure.seeding.DataSeedingApplication.class,
-                com.loopers.infrastructure.seeding.DataSeedingRunner.class
+                com.loopers.infrastructure.seeding.DataSeedingRunner.class,
+                com.loopers.application.scheduler.LikeCountSyncScheduler.class
             }
         )
     }

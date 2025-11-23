@@ -6,6 +6,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 
 /**
  * 데이터 시딩 전용 실행 애플리케이션.
@@ -32,7 +33,19 @@ import org.springframework.context.annotation.ComponentScan;
     }
 )
 @ConfigurationPropertiesScan
-@ComponentScan(basePackages = "com.loopers")
+@ComponentScan(
+    basePackages = "com.loopers",
+    excludeFilters = {
+        // 스케줄러 제외 (데이터 시딩 중에는 스케줄러가 실행되지 않도록)
+        // @EnableScheduling이 없어도 스케줄러가 등록되면 문제가 될 수 있으므로 제외
+        @ComponentScan.Filter(
+            type = FilterType.ASSIGNABLE_TYPE,
+            classes = {
+                com.loopers.application.scheduler.LikeCountSyncScheduler.class
+            }
+        )
+    }
+)
 public class DataSeedingApplication implements CommandLineRunner {
 
     private final DataSeedingService dataSeedingService;
