@@ -19,7 +19,21 @@ import lombok.NoArgsConstructor;
  * @version 1.0
  */
 @Entity
-@Table(name = "product")
+@Table(
+    name = "product",
+    indexes = {
+        // 브랜드 필터 + 좋아요 순 정렬 최적화 (복합 인덱스: ref_brand_id, like_count)
+        @Index(name = "idx_product_brand_likes", columnList = "ref_brand_id,like_count"),
+        // 브랜드 필터 + 최신순 정렬 최적화 (복합 인덱스: ref_brand_id, created_at)
+        @Index(name = "idx_product_brand_created", columnList = "ref_brand_id,created_at"),
+        // 브랜드 필터 + 가격순 정렬 최적화 (복합 인덱스: ref_brand_id, price)
+        @Index(name = "idx_product_brand_price", columnList = "ref_brand_id,price"),
+        // 전체 조회 + 좋아요 순 정렬 최적화
+        @Index(name = "idx_product_likes", columnList = "like_count"),
+        // 전체 조회 + 가격순 정렬 최적화
+        @Index(name = "idx_product_price", columnList = "price")
+    }
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
 public class Product extends BaseEntity {
