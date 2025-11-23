@@ -1,5 +1,6 @@
 package com.loopers.infrastructure.product;
 
+import com.loopers.application.catalog.ProductCacheService;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import java.util.Optional;
 @Component
 public class ProductRepositoryImpl implements ProductRepository {
     private final ProductJpaRepository productJpaRepository;
+    private final ProductCacheService productCacheService;
 
     /**
      * {@inheritDoc}
@@ -91,6 +93,9 @@ public class ProductRepositoryImpl implements ProductRepository {
                 String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId)));
         product.updateLikeCount(likeCount);
         productJpaRepository.save(product);
+        
+        // 좋아요 수 업데이트 시 캐시 무효화
+        productCacheService.evictProductCache(productId);
     }
 
     /**

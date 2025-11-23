@@ -10,7 +10,10 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisStaticMasterReplicaConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.util.List;
@@ -66,6 +69,37 @@ public class RedisConfig{
     ) {
         RedisTemplate<String, String> redisTemplate = new RedisTemplate<>();
         return defaultRedisTemplate(redisTemplate, lettuceConnectionFactory);
+    }
+
+    /**
+     * JSON 직렬화를 위한 RedisTemplate.
+     * <p>
+     * 객체를 JSON으로 직렬화하여 Redis에 저장합니다.
+     * </p>
+     *
+     * @param lettuceConnectionFactory Redis 연결 팩토리
+     * @return JSON 직렬화용 RedisTemplate
+     */
+    @Bean
+    public RedisTemplate<String, Object> jsonRedisTemplate(LettuceConnectionFactory lettuceConnectionFactory) {
+        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
+        
+        // Key는 String으로 직렬화
+        StringRedisSerializer stringSerializer = new StringRedisSerializer();
+        redisTemplate.setKeySerializer(stringSerializer);
+        redisTemplate.setHashKeySerializer(stringSerializer);
+        
+        // Value는 JSON으로 직렬화
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(objectMapper);
+        redisTemplate.setValueSerializer(jsonSerializer);
+        redisTemplate.setHashValueSerializer(jsonSerializer);
+        
+        redisTemplate.setConnectionFactory(lettuceConnectionFactory);
+        redisTemplate.afterPropertiesSet();
+        
+        return redisTemplate;
     }
 
 
