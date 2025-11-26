@@ -5,6 +5,7 @@ import com.loopers.domain.user.UserRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,6 +29,7 @@ public class UserInfoFacade {
      * @return 조회된 사용자 정보
      * @throws CoreException 사용자를 찾을 수 없는 경우
      */
+    @Cacheable(cacheNames = "userInfo", key = "#userId")
     public UserInfo getUserInfo(String userId) {
         User user = userRepository.findByUserId(userId);
         if (user == null) {

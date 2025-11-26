@@ -6,6 +6,10 @@ dependencies {
     implementation(project(":supports:logging"))
     implementation(project(":supports:monitoring"))
 
+    // cache
+    implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("com.github.ben-manes.caffeine:caffeine")
+
     // web
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
