@@ -232,3 +232,169 @@ locust -f locustfile.py --host=http://localhost:8080 --headless -u 500 -r 50 -t 
 4. **실패율**: 에러 발생 비율 확인
 
 인덱스와 캐시의 효과를 정량적으로 확인할 수 있습니다!
+
+---
+
+## Redis Benchmark 테스트
+
+Redis 서버의 성능을 측정하기 위한 `redis-benchmark` 테스트 스크립트입니다.
+
+### 사전 요구사항
+
+1. **Redis 서버 실행**
+   ```bash
+   docker-compose -f docker/infra-compose.yml up -d redis-master
+   ```
+
+2. **redis-cli 및 redis-benchmark 설치**
+   - Linux/Mac: `sudo apt-get install redis-tools` 또는 `brew install redis`
+   - Windows: Redis for Windows 설치 또는 WSL 사용
+
+### 사용 방법
+
+#### Linux/Mac
+
+```bash
+cd load-test
+chmod +x redis-benchmark.sh
+./redis-benchmark.sh
+```
+
+#### Windows
+
+```cmd
+cd load-test
+redis-benchmark.bat
+```
+
+#### 환경변수 설정 (선택사항)
+
+```bash
+# Redis 호스트 및 포트 설정
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+./redis-benchmark.sh
+```
+
+### 테스트 시나리오
+
+스크립트는 다음 5가지 테스트를 자동으로 실행합니다:
+
+#### 1. 기본 벤치마크 (GET/SET)
+- **목적**: 기본적인 GET/SET 명령어 성능 측정
+- **설정**: 100,000개 요청, 50개 동시 연결, 100 bytes 데이터
+
+#### 2. 다양한 명령어 벤치마크
+- **목적**: 다양한 Redis 명령어의 성능 측정
+- **명령어**: GET, SET, INCR, LPUSH, RPUSH, LPOP, RPOP, SADD, HSET, SPOP, LRANGE
+- **설정**: 10,000개 요청, 10개 동시 연결
+
+#### 3. 동시 연결 수별 성능 테스트
+- **목적**: 동시 연결 수에 따른 성능 변화 확인
+- **테스트**: 1, 10, 50, 100개 동시 연결
+- **분석**: 동시 연결 수 증가에 따른 처리량 변화 확인
+
+#### 4. 데이터 크기별 성능 테스트
+- **목적**: 데이터 크기에 따른 성능 변화 확인
+- **테스트**: 10, 100, 1,000, 10,000 bytes
+- **분석**: 데이터 크기 증가에 따른 처리량 감소 확인
+
+#### 5. 파이프라인 테스트
+- **목적**: 파이프라인 사용 시 성능 향상 확인
+- **설정**: 파이프라인 크기 16, 100,000개 요청
+- **분석**: 파이프라인 사용 시 처리량 증가 확인
+
+### 결과 해석
+
+#### 주요 지표
+
+- **requests per second**: 초당 처리 가능한 요청 수 (높을수록 좋음)
+- **latency**: 요청당 평균 지연 시간 (낮을수록 좋음)
+- **throughput**: 전체 처리량
+
+#### 예상 성능 (일반적인 Redis 서버)
+
+- **GET/SET (100 bytes)**: 50,000~100,000 requests/sec
+- **파이프라인 사용 시**: 200,000~500,000 requests/sec
+- **대용량 데이터 (10KB)**: 10,000~20,000 requests/sec
+
+### 커스텀 벤치마크 실행
+
+#### 특정 명령어만 테스트
+
+```bash
+# GET 명령어만 테스트
+redis-benchmark -h localhost -p 6379 -t get -n 100000 -c 50
+
+# SET 명령어만 테스트
+redis-benchmark -h localhost -p 6379 -t set -n 100000 -c 50
+```
+
+#### 특정 데이터 크기로 테스트
+
+```bash
+# 1KB 데이터로 테스트
+redis-benchmark -h localhost -p 6379 -t get,set -n 100000 -c 50 -d 1024
+
+# 10KB 데이터로 테스트
+redis-benchmark -h localhost -p 6379 -t get,set -n 100000 -c 50 -d 10240
+```
+
+#### 파이프라인 크기 조정
+
+```bash
+# 파이프라인 크기 32로 테스트
+redis-benchmark -h localhost -p 6379 -t get,set -n 100000 -c 50 -P 32
+```
+
+### Eviction 정책 테스트
+
+메모리 제한이 설정된 경우 eviction 정책의 효과를 테스트할 수 있습니다:
+
+```bash
+# 메모리 제한 확인
+redis-cli CONFIG GET maxmemory
+redis-cli CONFIG GET maxmemory-policy
+
+# 메모리 사용량 확인
+redis-cli INFO memory
+
+# Eviction 발생 확인
+redis-cli INFO stats | grep evicted_keys
+```
+
+### 성능 최적화 팁
+
+1. **파이프라인 사용**: 여러 명령어를 한 번에 전송하여 네트워크 오버헤드 감소
+2. **연결 풀링**: 애플리케이션에서 연결을 재사용
+3. **메모리 최적화**: 적절한 데이터 구조 선택 (String vs Hash vs List)
+4. **네트워크 최적화**: 같은 네트워크 내에서 실행하거나 Unix 소켓 사용
+
+### 주의사항
+
+1. **프로덕션 환경 주의**: redis-benchmark는 높은 부하를 생성하므로 프로덕션 환경에서는 사용하지 마세요
+2. **네트워크 지연**: 원격 Redis 서버의 경우 네트워크 지연이 결과에 영향을 줄 수 있습니다
+3. **시스템 리소스**: 테스트 중 시스템의 CPU, 메모리 사용량을 모니터링하세요
+
+### 결과 비교
+
+다양한 Redis 설정에 따른 성능 비교:
+
+```bash
+# 기본 설정
+./redis-benchmark.sh > results_default.txt
+
+# 메모리 제한 설정 후
+docker-compose -f docker/infra-compose.yml restart redis-master
+./redis-benchmark.sh > results_limited_memory.txt
+
+# Eviction 정책 변경 후
+# docker/infra-compose.yml에서 maxmemory-policy 변경
+docker-compose -f docker/infra-compose.yml restart redis-master
+./redis-benchmark.sh > results_eviction.txt
+```
+
+### 참고 자료
+
+- [Redis Benchmark 공식 문서](https://redis.io/docs/management/optimization/benchmarks/)
+- [Redis Performance Tuning](https://redis.io/docs/management/optimization/)
