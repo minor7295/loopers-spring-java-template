@@ -11,7 +11,7 @@ python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Locust 설치
-pip install -r requirements-locust.txt
+pip install -r requirements.txt
 ```
 
 ## 사용 방법
