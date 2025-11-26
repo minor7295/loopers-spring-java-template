@@ -1,0 +1,245 @@
+{
+  "id": null,
+  "uid": "local-cache-dashboard",
+  "title": "Commerce API - Local Cache (userInfo)",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "tags": ["commerce-api", "cache", "caffeine"],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "userInfo Cache Size",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PROMETHEUS"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "cache_size{application=\"commerce-api\", cache=\"userInfo\"}",
+          "legendFormat": "userInfo"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "title": "userInfo Cache Hit Rate (5m, %)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PROMETHEUS"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(cache_gets_total{application=\"commerce-api\", cache=\"userInfo\", result=\"hit\"}[5m]))\n  / sum(rate(cache_gets_total{application=\"commerce-api\", cache=\"userInfo\"}[5m]))",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "fieldOptions": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          },
+          "overrides": []
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      }
+    },
+    {
+      "id": 3,
+      "title": "userInfo Cache Gets (Hit vs Miss, per second)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PROMETHEUS"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(cache_gets_total{application=\"commerce-api\", cache=\"userInfo\", result=\"hit\"}[1m])",
+          "legendFormat": "hit"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(cache_gets_total{application=\"commerce-api\", cache=\"userInfo\", result=\"miss\"}[1m])",
+          "legendFormat": "miss"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "req/s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "id": 4,
+      "title": "userInfo Cache Evictions",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PROMETHEUS"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(cache_evictions_total{application=\"commerce-api\", cache=\"userInfo\"}[5m])",
+          "legendFormat": "evictions (5m)"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(cache_eviction_weight_total{application=\"commerce-api\", cache=\"userInfo\"}[5m])",
+          "legendFormat": "eviction weight (5m)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      }
+    },
+    {
+      "id": 5,
+      "title": "Caffeine Native Hits/Misses (userInfo)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(caffeine_cache_hits_total{application=\"commerce-api\", cache=\"userInfo\"}[1m])",
+          "legendFormat": "hits/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(caffeine_cache_misses_total{application=\"commerce-api\", cache=\"userInfo\"}[1m])",
+          "legendFormat": "misses/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "1/s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "type": "constant",
+        "label": "application",
+        "hide": 2,
+        "query": "commerce-api",
+        "current": {
+          "text": "commerce-api",
+          "value": "commerce-api",
+          "selected": true
+        },
+        "options": [
+          {
+            "text": "commerce-api",
+            "value": "commerce-api",
+            "selected": true
+          }
+        ]
+      }
+    ]
+  }
+}
