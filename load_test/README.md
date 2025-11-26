@@ -1,6 +1,7 @@
-# 부하 테스트 (Load Test)
+# 상품 조회 부하 테스트 가이드
 
-Commerce API의 성능을 테스트하기 위한 Locust 부하 테스트 스크립트입니다.
+Commerce API의 상품 조회 성능을 테스트하기 위한 Locust 부하 테스트 스크립트입니다.
+**인덱스와 캐시의 성능 차이**를 확인하는 데 특화되어 있습니다.
 
 ## 설치
 
@@ -39,20 +40,28 @@ locust -f locustfile.py --host=http://localhost:8080 --headless -u 100 -r 10 -t 
 
 ### 3. 태그별 실행
 
-특정 API 그룹만 테스트할 수 있습니다:
-
+#### 인덱스 성능 테스트만 실행
 ```bash
-# 카탈로그 API만 테스트
-locust -f locustfile.py --host=http://localhost:8080 --tags catalog
+# 인덱스 사용 여부에 따른 성능 차이 확인
+locust -f locustfile.py --host=http://localhost:8080 --tags index --headless -u 50 -r 5 -t 3m
+```
 
-# 읽기 전용 API만 테스트
-locust -f locustfile.py --host=http://localhost:8080 --tags read
+#### 캐시 성능 테스트만 실행
+```bash
+# 캐시 히트/미스에 따른 성능 차이 확인
+locust -f locustfile.py --host=http://localhost:8080 --tags cache --headless -u 50 -r 5 -t 3m
+```
 
-# 쓰기 API만 테스트
-locust -f locustfile.py --host=http://localhost:8080 --tags write
+#### 캐시 히트 시나리오만 실행
+```bash
+# 캐시된 데이터 조회 (첫 페이지, 상세 정보)
+locust -f locustfile.py --host=http://localhost:8080 --tags cache_hit --headless -u 50 -r 5 -t 3m
+```
 
-# 여러 태그 조합
-locust -f locustfile.py --host=http://localhost:8080 --tags catalog,read
+#### 캐시 미스 시나리오만 실행
+```bash
+# 캐시되지 않은 데이터 조회 (다른 페이지, 다양한 상품)
+locust -f locustfile.py --host=http://localhost:8080 --tags cache_miss --headless -u 50 -r 5 -t 3m
 ```
 
 ### 4. 결과 저장
@@ -67,52 +76,133 @@ locust -f locustfile.py --host=http://localhost:8080 --headless -u 100 -r 10 -t 
 
 ## 테스트 시나리오
 
-### 기본 시나리오 (CommerceApiUser)
+### 1. 인덱스 성능 테스트 (`index` 태그)
 
-모든 API를 포함한 종합 테스트:
-- 상품 목록/상세 조회 (가장 빈번)
-- 브랜드 조회
-- 사용자 정보 조회
-- 포인트 조회/충전
-- 좋아요 추가/삭제/목록 조회
-- 주문 생성/조회
+다양한 정렬 옵션과 브랜드 필터 조합을 테스트하여 인덱스 사용 여부에 따른 성능 차이를 확인합니다.
 
-### 웹사이트 사용자 시나리오 (WebsiteUser)
+#### 테스트 케이스:
+- **전체 조회 + 최신순**: `idx_product_created` 또는 인덱스 없음
+- **전체 조회 + 좋아요순**: `idx_product_likes` 인덱스 사용
+- **전체 조회 + 가격순**: `idx_product_price` 인덱스 사용
+- **브랜드 필터 + 최신순**: `idx_product_brand_created` 인덱스 사용
+- **브랜드 필터 + 좋아요순**: `idx_product_brand_likes` 인덱스 사용
+- **브랜드 필터 + 가격순**: `idx_product_brand_price` 인덱스 사용
 
-읽기 중심의 시나리오:
-- 상품 둘러보기
-- 브랜드 보기
+#### 예상 결과:
+- 인덱스가 있는 쿼리: **10~50ms**
+- 인덱스가 없는 쿼리: **500ms 이상**
 
-### 모바일 앱 사용자 시나리오 (MobileAppUser)
+### 2. 캐시 성능 테스트 (`cache` 태그)
 
-좋아요와 주문을 포함한 시나리오:
-- 상품 조회
-- 좋아요 추가 (30% 확률)
-- 주문 생성 (10% 확률)
+캐시 히트/미스에 따른 성능 차이를 확인합니다.
+
+#### 캐시 히트 시나리오 (`cache_hit`):
+- **첫 페이지 조회** (page=0): Redis 캐시에서 조회
+- **상품 상세 조회**: Redis 캐시에서 조회
+- **브랜드별 첫 페이지**: Redis 캐시에서 조회
+
+#### 캐시 미스 시나리오 (`cache_miss`):
+- **다른 페이지 조회** (page > 0): DB에서 직접 조회
+- **다양한 상품 상세**: 캐시되지 않은 상품 조회
+
+#### 예상 결과:
+- 캐시 히트: **1~5ms**
+- 캐시 미스: **10~50ms** (인덱스 사용 시)
+
+### 3. 페이지네이션 테스트 (`pagination` 태그)
+
+페이지 깊이에 따른 성능 차이를 확인합니다.
+
+- **얕은 페이지** (page 0~10): 빠른 응답
+- **깊은 페이지** (page 20~50): OFFSET이 커서 성능 저하 가능
+
+## 사용자 클래스
+
+### ProductQueryUser (기본)
+모든 테스트 시나리오를 포함한 기본 사용자 클래스입니다.
+
+### IndexPerformanceUser
+인덱스 성능 테스트에 특화된 사용자 클래스입니다.
+```bash
+locust -f locustfile.py --host=http://localhost:8080 --class IndexPerformanceUser
+```
+
+### CachePerformanceUser
+캐시 성능 테스트에 특화된 사용자 클래스입니다.
+```bash
+locust -f locustfile.py --host=http://localhost:8080 --class CachePerformanceUser
+```
+
+### MixedLoadUser
+실제 사용자 패턴을 시뮬레이션하는 혼합 부하 테스트입니다.
+```bash
+locust -f locustfile.py --host=http://localhost:8080 --class MixedLoadUser
+```
 
 ## 태그 목록
 
-- `catalog`: 카탈로그 관련 API (상품, 브랜드)
-- `user`: 사용자 정보 API
-- `point`: 포인트 관련 API
-- `like`: 좋아요 관련 API
-- `order`: 주문 관련 API
-- `read`: 읽기 전용 API
-- `write`: 쓰기 API
+- `index`: 인덱스 성능 테스트
+- `cache`: 캐시 성능 테스트
+- `cache_hit`: 캐시 히트 시나리오
+- `cache_miss`: 캐시 미스 시나리오
+- `list`: 상품 목록 조회
+- `detail`: 상품 상세 조회
+- `pagination`: 페이지네이션 테스트
+
+## 성능 비교 테스트 가이드
+
+### 1. 인덱스 유무에 따른 성능 비교
+
+#### 인덱스 있는 경우
+```bash
+# 인덱스가 적용된 상태에서 테스트
+locust -f locustfile.py --host=http://localhost:8080 --tags index --headless -u 100 -r 10 -t 5m --csv=results_with_index
+```
+
+#### 인덱스 없는 경우 (인덱스 제거 후)
+```bash
+# 인덱스를 제거한 상태에서 테스트
+# 1. DB에서 인덱스 제거
+# 2. 테스트 실행
+locust -f locustfile.py --host=http://localhost:8080 --tags index --headless -u 100 -r 10 -t 5m --csv=results_without_index
+```
+
+#### 결과 비교
+- `results_with_index_stats.csv`와 `results_without_index_stats.csv` 비교
+- 평균 응답 시간, 95th percentile 등 비교
+
+### 2. 캐시 유무에 따른 성능 비교
+
+#### 캐시 활성화 상태
+```bash
+# Redis 캐시가 활성화된 상태에서 테스트
+locust -f locustfile.py --host=http://localhost:8080 --tags cache_hit --headless -u 100 -r 10 -t 5m --csv=results_with_cache
+```
+
+#### 캐시 비활성화 상태 (Redis 중지 또는 캐시 로직 주석 처리)
+```bash
+# Redis를 중지하거나 캐시 로직을 비활성화한 상태에서 테스트
+locust -f locustfile.py --host=http://localhost:8080 --tags cache_hit --headless -u 100 -r 10 -t 5m --csv=results_without_cache
+```
 
 ## 주의사항
 
-1. **사용자 ID 범위**: `on_start()` 메서드에서 사용자 ID 범위를 실제 데이터에 맞게 조정하세요.
-2. **상품 ID 범위**: 실제 데이터베이스의 상품 수에 맞게 조정하세요.
-3. **서버 주소**: `--host` 옵션을 실제 테스트 대상 서버 주소로 변경하세요.
-4. **데이터 시딩**: 부하 테스트 전에 충분한 테스트 데이터를 생성해야 합니다.
+1. **데이터 준비**: 부하 테스트 전에 충분한 테스트 데이터를 생성해야 합니다.
+   - 상품: 최소 10,000개 이상 권장
+   - 브랜드: 100개 이상 권장
+   - 데이터 시딩: `apps/commerce-api/scripts/run-seeding.sh` 실행
 
-## 성능 모니터링 팁
+2. **인덱스 상태 확인**: 테스트 전에 인덱스가 제대로 생성되었는지 확인하세요.
+   ```sql
+   SHOW INDEX FROM product;
+   ```
 
-1. **단계적 부하 증가**: 처음에는 낮은 사용자 수로 시작하여 점진적으로 증가시키세요.
-2. **모니터링 도구**: 서버의 CPU, 메모리, 네트워크 사용량을 모니터링하세요.
-3. **데이터베이스 모니터링**: 쿼리 성능과 연결 풀 상태를 확인하세요.
-4. **캐시 효과**: Redis 캐시의 히트율을 확인하세요.
+3. **캐시 상태 확인**: Redis가 실행 중인지 확인하세요.
+   ```bash
+   redis-cli ping
+   ```
+
+4. **서버 모니터링**: 테스트 중 서버의 CPU, 메모리, DB 연결 풀 상태를 모니터링하세요.
 
 ## 예시 실행 명령어
 
@@ -121,12 +211,24 @@ locust -f locustfile.py --host=http://localhost:8080 --headless -u 100 -r 10 -t 
 cd load_test
 locust -f locustfile.py --host=http://localhost:8080 --headless -u 10 -r 2 -t 1m
 
-# 중간 부하 테스트 (100명, 5분)
-locust -f locustfile.py --host=http://localhost:8080 --headless -u 100 -r 10 -t 5m
+# 인덱스 성능 테스트 (50명, 3분)
+locust -f locustfile.py --host=http://localhost:8080 --tags index --headless -u 50 -r 5 -t 3m --csv=index_test
+
+# 캐시 성능 테스트 (50명, 3분)
+locust -f locustfile.py --host=http://localhost:8080 --tags cache --headless -u 50 -r 5 -t 3m --csv=cache_test
+
+# 혼합 부하 테스트 (100명, 5분)
+locust -f locustfile.py --host=http://localhost:8080 --class MixedLoadUser --headless -u 100 -r 10 -t 5m --csv=mixed_test
 
 # 고부하 테스트 (500명, 10분)
-locust -f locustfile.py --host=http://localhost:8080 --headless -u 500 -r 50 -t 10m
-
-# 카탈로그 API만 집중 테스트 (200명, 3분)
-locust -f locustfile.py --host=http://localhost:8080 --headless -u 200 -r 20 -t 3m --tags catalog
+locust -f locustfile.py --host=http://localhost:8080 --headless -u 500 -r 50 -t 10m --csv=high_load_test
 ```
+
+## 결과 분석 팁
+
+1. **평균 응답 시간**: 각 엔드포인트별 평균 응답 시간 비교
+2. **95th percentile**: 95%의 요청이 이 시간 이내에 완료
+3. **RPS (Requests Per Second)**: 초당 처리 가능한 요청 수
+4. **실패율**: 에러 발생 비율 확인
+
+인덱스와 캐시의 효과를 정량적으로 확인할 수 있습니다!
