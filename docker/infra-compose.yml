@@ -37,6 +37,15 @@ services:
       - "6379:6379"
     volumes:
       - redis_master_data:/data
+    # 부하테스트를 위한 성능 저하 설정
+    deploy:
+      resources:
+        limits:
+          cpus: '0.01'  # CPU 사용량을 1%로 제한 (매우 느린 처리)
+          memory: 64M  # 메모리를 64MB로 제한 (최소 요구사항)
+        reservations:
+          cpus: '0.01'  # 최소 CPU 보장
+          memory: 48M  # 최소 메모리 보장
     command:
       [
         "redis-server", # redis 서버 실행 명령어
@@ -72,13 +81,15 @@ services:
       - "6380:6379"
     volumes:
       - redis_readonly_data:/data
-    # eviction 테스트용
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 10M
-    #     reservations:
-    #       memory: 5M
+    # 부하테스트를 위한 성능 저하 설정
+    deploy:
+      resources:
+        limits:
+          cpus: '0.01'  # CPU 사용량을 1%로 제한 (매우 느린 처리)
+          memory: 64M  # 메모리를 64MB로 제한 (최소 요구사항)
+        reservations:
+          cpus: '0.01'  # 최소 CPU 보장
+          memory: 48M  # 최소 메모리 보장
     command:
       [
         "redis-server",
@@ -86,10 +97,11 @@ services:
         "--appendfsync", "everysec",
         "--replicaof", "redis-master", "6379", # replica 모드로 실행 + 서비스 명, 서비스 포트
         "--replica-read-only", "yes", # 읽기 전용으로 설정
-        "--latency-monitor-threshold", "100",
-        "--maxmemory", "2gb", # 최대 메모리 2GB (시스템 메모리에 따라 조정 필요)
-        # "--maxmemory", "5mb", #  # eviction 테스트용
-        "--maxmemory-policy", "volatile-lru", # TTL이 있는 키 중 최근 사용 안 된 키 삭제
+        "--latency-monitor-threshold", "10", # 지연 모니터링 임계값 낮춤 (10ms)
+        "--maxmemory", "48mb", # 최대 메모리 48MB로 제한 (eviction 빈번하게 발생)
+        "--maxmemory-policy", "allkeys-lru", # 모든 키 중 LRU로 삭제 (eviction 빈번)
+        "--slowlog-log-slower-than", "1000", # 1ms 이상 걸리는 명령어 로깅
+        "--hz", "1", # 백그라운드 작업 빈도 최소화 (성능 저하)
       ]
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "6379", "PING"]
