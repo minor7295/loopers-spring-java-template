@@ -28,7 +28,17 @@ services:
         "--save", "",
         "--latency-monitor-threshold", "100", # 특정 command 가 지정 시간(ms) 이상 걸리면 monitor 기록
         "--maxmemory", "2gb", # 최대 메모리 2GB (시스템 메모리에 따라 조정 필요)
+        # "--maxmemory", "5mb", # eviction 테스트용
         "--maxmemory-policy", "volatile-lru", # TTL이 있는 키 중 최근 사용 안 된 키 삭제
+        # Eviction Policy 옵션:
+        # - volatile-lru: TTL이 있는 키 중 LRU로 삭제
+        # - allkeys-lru: 모든 키 중 LRU로 삭제
+        # - volatile-lfu: TTL이 있는 키 중 LFU로 삭제
+        # - allkeys-lfu: 모든 키 중 LFU로 삭제
+        # - volatile-random: TTL이 있는 키 중 랜덤 삭제
+        # - allkeys-random: 모든 키 중 랜덤 삭제
+        # - volatile-ttl: TTL이 있는 키 중 만료 시간이 짧은 것부터 삭제
+        # - noeviction: 메모리 초과 시 에러 반환 (삭제 안 함)
       ]
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "6379", "PING"]
@@ -46,6 +56,13 @@ services:
       - "6380:6379"
     volumes:
       - redis_readonly_data:/data
+    # eviction 테스트용
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 10M
+    #     reservations:
+    #       memory: 5M
     command:
       [
         "redis-server",
@@ -55,6 +72,7 @@ services:
         "--replica-read-only", "yes", # 읽기 전용으로 설정
         "--latency-monitor-threshold", "100",
         "--maxmemory", "2gb", # 최대 메모리 2GB (시스템 메모리에 따라 조정 필요)
+        # "--maxmemory", "5mb", #  # eviction 테스트용
         "--maxmemory-policy", "volatile-lru", # TTL이 있는 키 중 최근 사용 안 된 키 삭제
       ]
     healthcheck:
