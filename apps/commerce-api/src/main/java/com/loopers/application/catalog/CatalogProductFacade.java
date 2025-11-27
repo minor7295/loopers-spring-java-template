@@ -94,7 +94,8 @@ public class CatalogProductFacade {
         // 캐시 저장
         productCacheService.cacheProductList(brandId, normalizedSort, page, size, result);
         
-        return result;
+        // 로컬 캐시의 좋아요 수 델타 적용 (DB 조회 결과에도 델타 반영)
+        return productCacheService.applyLikeCountDelta(result);
     }
 
     /**
@@ -133,7 +134,8 @@ public class CatalogProductFacade {
         // 캐시에 저장
         productCacheService.cacheProduct(productId, result);
         
-        return result;
+        // 로컬 캐시의 좋아요 수 델타 적용 (DB 조회 결과에도 델타 반영)
+        return productCacheService.applyLikeCountDelta(result);
     }
 
 }

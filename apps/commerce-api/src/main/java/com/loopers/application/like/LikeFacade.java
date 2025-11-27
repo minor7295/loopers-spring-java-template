@@ -1,5 +1,6 @@
 package com.loopers.application.like;
 
+import com.loopers.application.catalog.ProductCacheService;
 import com.loopers.domain.like.Like;
 import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
@@ -32,6 +33,7 @@ public class LikeFacade {
     private final LikeRepository likeRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final ProductCacheService productCacheService;
 
     /**
      * 상품에 좋아요를 추가합니다.
@@ -78,11 +80,14 @@ public class LikeFacade {
         Like like = Like.of(user.getId(), productId);
         try {
             likeRepository.save(like);
+            // 좋아요 추가 성공 시 로컬 캐시의 델타 증가
+            productCacheService.incrementLikeCountDelta(productId);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             // UNIQUE 제약조건 위반 = 이미 저장됨 (멱등성 보장)
             // 동시에 여러 요청이 들어와서 모두 "없음"으로 판단하고 저장을 시도할 때,
             // 첫 번째만 성공하고 나머지는 UNIQUE 제약조건 위반 예외 발생
             // 이미 좋아요가 존재하는 경우이므로 정상 처리로 간주
+            // 로컬 캐시는 업데이트하지 않음 (이미 좋아요가 존재하므로)
         }
     }
 
@@ -107,9 +112,12 @@ public class LikeFacade {
 
         try {
             likeRepository.delete(like.get());
+            // 좋아요 취소 성공 시 로컬 캐시의 델타 감소
+            productCacheService.decrementLikeCountDelta(productId);
         } catch (Exception e) {
             // 동시성 상황에서 이미 삭제된 경우 등 예외 발생 가능
             // 멱등성 보장: 이미 삭제된 경우 정상 처리로 간주
+            // 로컬 캐시는 업데이트하지 않음 (이미 삭제되었으므로)
         }
     }
 
