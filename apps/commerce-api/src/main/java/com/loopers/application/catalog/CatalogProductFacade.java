@@ -44,20 +44,23 @@ public class CatalogProductFacade {
      * @return 상품 목록 조회 결과
      */
     public ProductInfoList getProducts(Long brandId, String sort, int page, int size) {
-        // 첫 페이지인 경우에만 캐시에서 조회 시도
-        ProductInfoList cachedResult = productCacheService.getCachedProductList(brandId, sort, page, size);
+        // sort 기본값 처리 (컨트롤러와 동일하게 "latest" 사용)
+        String normalizedSort = (sort != null && !sort.isBlank()) ? sort : "latest";
+        
+        // 캐시에서 조회 시도
+        ProductInfoList cachedResult = productCacheService.getCachedProductList(brandId, normalizedSort, page, size);
         if (cachedResult != null) {
             return cachedResult;
         }
         
         // 캐시에 없으면 DB에서 조회
         long totalCount = productRepository.countAll(brandId);
-        List<Product> products = productRepository.findAll(brandId, sort, page, size);
+        List<Product> products = productRepository.findAll(brandId, normalizedSort, page, size);
         
         if (products.isEmpty()) {
             ProductInfoList emptyResult = new ProductInfoList(List.of(), totalCount, page, size);
-            // 첫 페이지인 경우에만 캐시 저장
-            productCacheService.cacheProductList(brandId, sort, page, size, emptyResult);
+            // 캐시 저장
+            productCacheService.cacheProductList(brandId, normalizedSort, page, size, emptyResult);
             return emptyResult;
         }
         
@@ -88,8 +91,8 @@ public class CatalogProductFacade {
         
         ProductInfoList result = new ProductInfoList(productsInfo, totalCount, page, size);
         
-        // 첫 페이지인 경우에만 캐시 저장
-        productCacheService.cacheProductList(brandId, sort, page, size, result);
+        // 캐시 저장
+        productCacheService.cacheProductList(brandId, normalizedSort, page, size, result);
         
         return result;
     }

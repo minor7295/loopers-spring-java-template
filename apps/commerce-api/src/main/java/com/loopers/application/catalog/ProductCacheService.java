@@ -2,6 +2,9 @@ package com.loopers.application.catalog;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -39,6 +42,7 @@ public class ProductCacheService {
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
     private final DefaultRedisScript<Long> evictByPatternScript;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Lua 스크립트를 사용한 캐시 무효화를 위한 생성자.
@@ -48,10 +52,12 @@ public class ProductCacheService {
      */
     public ProductCacheService(
             RedisTemplate<String, String> redisTemplate,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry
     ) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
         
         // Lua 스크립트 로드
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
@@ -59,37 +65,54 @@ public class ProductCacheService {
         script.setResultType(Long.class);
         this.evictByPatternScript = script;
     }
+    
+    /**
+     * 동적으로 Counter를 생성하거나 기존 Counter를 반환합니다.
+     */
+    private Counter getCounter(String name, String operation, String... additionalTags) {
+        Tags tags = Tags.of("cache_type", "product", "operation", operation);
+        if (additionalTags.length > 0) {
+            for (int i = 0; i < additionalTags.length; i += 2) {
+                if (i + 1 < additionalTags.length) {
+                    tags = tags.and(additionalTags[i], additionalTags[i + 1]);
+                }
+            }
+        }
+        return Counter.builder(name)
+            .description("Product cache " + name)
+            .tags(tags)
+            .register(meterRegistry);
+    }
 
     /**
      * 상품 목록 조회 결과를 캐시에서 조회합니다.
      * <p>
-     * 첫 페이지(page=0)인 경우에만 캐시에서 조회합니다.
+     * 페이지 번호와 관계없이 캐시를 확인하고, 캐시에 있으면 반환합니다.
+     * 캐시에 없으면 null을 반환하여 DB 조회를 유도합니다.
      * </p>
      *
      * @param brandId 브랜드 ID (null이면 전체)
      * @param sort 정렬 기준
      * @param page 페이지 번호
      * @param size 페이지당 상품 수
-     * @return 캐시된 상품 목록 (없거나 첫 페이지가 아니면 null)
+     * @return 캐시된 상품 목록 (없으면 null)
      */
     public ProductInfoList getCachedProductList(Long brandId, String sort, int page, int size) {
-        // 첫 페이지가 아니면 캐시 조회하지 않음
-        if (page != 0) {
-            return null;
-        }
-        
         try {
             String key = buildListCacheKey(brandId, sort, page, size);
             String cachedValue = redisTemplate.opsForValue().get(key);
             
             if (cachedValue == null) {
+                getCounter("product_cache_misses_total", "list", "reason", "not_found").increment();
                 return null;
             }
             
+            getCounter("product_cache_hits_total", "list").increment();
             return objectMapper.readValue(cachedValue, new TypeReference<ProductInfoList>() {});
         } catch (Exception e) {
             log.warn("상품 목록 캐시 조회 실패: brandId={}, sort={}, page={}, size={}", 
                 brandId, sort, page, size, e);
+            getCounter("product_cache_query_failures_total", "list").increment();
             return null;
         }
     }
@@ -107,8 +130,8 @@ public class ProductCacheService {
      * @param productInfoList 캐시할 상품 목록
      */
     public void cacheProductList(Long brandId, String sort, int page, int size, ProductInfoList productInfoList) {
-        // 첫 페이지가 아니면 캐시 저장하지 않음
-        if (page != 0) {
+        // 1페이지까지만 캐시 저장
+        if (page > 0) {
             return;
         }
         
@@ -116,9 +139,12 @@ public class ProductCacheService {
             String key = buildListCacheKey(brandId, sort, page, size);
             String value = objectMapper.writeValueAsString(productInfoList);
             redisTemplate.opsForValue().set(key, value, CACHE_TTL);
+            
+            getCounter("product_cache_saves_total", "list").increment();
         } catch (Exception e) {
             log.warn("상품 목록 캐시 저장 실패: brandId={}, sort={}, page={}, size={}", 
                 brandId, sort, page, size, e);
+            getCounter("product_cache_save_failures_total", "list").increment();
         }
     }
 
@@ -134,12 +160,15 @@ public class ProductCacheService {
             String cachedValue = redisTemplate.opsForValue().get(key);
             
             if (cachedValue == null) {
+                getCounter("product_cache_misses_total", "detail", "reason", "not_found").increment();
                 return null;
             }
             
+            getCounter("product_cache_hits_total", "detail").increment();
             return objectMapper.readValue(cachedValue, new TypeReference<ProductInfo>() {});
         } catch (Exception e) {
             log.warn("상품 상세 캐시 조회 실패: productId={}", productId, e);
+            getCounter("product_cache_query_failures_total", "detail").increment();
             return null;
         }
     }
@@ -155,8 +184,11 @@ public class ProductCacheService {
             String key = buildDetailCacheKey(productId);
             String value = objectMapper.writeValueAsString(productInfo);
             redisTemplate.opsForValue().set(key, value, CACHE_TTL);
+            
+            getCounter("product_cache_saves_total", "detail").increment();
         } catch (Exception e) {
             log.warn("상품 상세 캐시 저장 실패: productId={}", productId, e);
+            getCounter("product_cache_save_failures_total", "detail").increment();
         }
     }
 
@@ -241,8 +273,10 @@ public class ProductCacheService {
      */
     private String buildListCacheKey(Long brandId, String sort, int page, int size) {
         String brandPart = brandId != null ? "brand:" + brandId : "brand:all";
+        // sort가 null이면 기본값 "latest" 사용 (컨트롤러와 동일한 기본값)
+        String sortValue = sort != null ? sort : "latest";
         return String.format("%s%s:sort:%s:page:%d:size:%d", 
-            CACHE_KEY_PREFIX_LIST, brandPart, sort, page, size);
+            CACHE_KEY_PREFIX_LIST, brandPart, sortValue, page, size);
     }
 
     /**

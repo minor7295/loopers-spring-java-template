@@ -31,7 +31,9 @@ import lombok.NoArgsConstructor;
         // 전체 조회 + 좋아요 순 정렬 최적화
         @Index(name = "idx_product_likes", columnList = "like_count"),
         // 전체 조회 + 가격순 정렬 최적화
-        @Index(name = "idx_product_price", columnList = "price")
+        @Index(name = "idx_product_price", columnList = "price"),
+        // 전체 조회 + 최신순 정렬 최적화
+//        @Index(name = "idx_product_created", columnList = "created_at")
     }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
