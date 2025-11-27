@@ -1,5 +1,6 @@
 package com.loopers.application.like;
 
+import com.loopers.application.catalog.ProductCacheService;
 import com.loopers.domain.like.Like;
 import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
@@ -11,6 +12,9 @@ import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,10 +30,20 @@ import static org.mockito.Mockito.never;
 @DisplayName("LikeFacade 좋아요 등록/취소/중복 방지 흐름 검증")
 class LikeFacadeTest {
 
-    private LikeFacade likeFacade;
-    private UserRepository userRepository;
-    private ProductRepository productRepository;
+    @Mock
     private LikeRepository likeRepository;
+    
+    @Mock
+    private UserRepository userRepository;
+    
+    @Mock
+    private ProductRepository productRepository;
+    
+    @Mock
+    private ProductCacheService productCacheService;
+
+    @InjectMocks
+    private LikeFacade likeFacade;
 
     private static final String DEFAULT_USER_ID = "testuser";
     private static final Long DEFAULT_USER_INTERNAL_ID = 1L;
@@ -37,15 +51,7 @@ class LikeFacadeTest {
 
     @BeforeEach
     void setUp() {
-        userRepository = mock(UserRepository.class);
-        productRepository = mock(ProductRepository.class);
-        likeRepository = mock(LikeRepository.class);
-
-        likeFacade = new LikeFacade(
-            likeRepository,
-            userRepository,
-            productRepository
-        );
+        MockitoAnnotations.openMocks(this);
     }
 
     @Test

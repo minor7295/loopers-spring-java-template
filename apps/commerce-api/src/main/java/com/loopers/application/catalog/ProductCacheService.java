@@ -2,11 +2,15 @@ package com.loopers.application.catalog;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.domain.product.ProductDetail;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 상품 조회 결과를 Redis에 캐시하는 서비스.
@@ -33,12 +37,24 @@ public class ProductCacheService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    
+    /**
+     * 로컬 캐시: 상품별 좋아요 수 델타 (productId -> likeCount delta)
+     * <p>
+     * 좋아요 추가/취소 시 델타를 저장하고, 캐시 조회 시 델타를 적용하여 반환합니다.
+     * 배치 집계 후에는 초기화됩니다.
+     * </p>
+     */
+    private final ConcurrentHashMap<Long, Long> likeCountDeltaCache = new ConcurrentHashMap<>();
 
     /**
      * 상품 목록 조회 결과를 캐시에서 조회합니다.
      * <p>
      * 페이지 번호와 관계없이 캐시를 확인하고, 캐시에 있으면 반환합니다.
      * 캐시에 없으면 null을 반환하여 DB 조회를 유도합니다.
+     * </p>
+     * <p>
+     * 로컬 캐시의 좋아요 수 델타를 적용하여 반환합니다.
      * </p>
      *
      * @param brandId 브랜드 ID (null이면 전체)
@@ -55,7 +71,11 @@ public class ProductCacheService {
             if (cachedValue == null) {
                 return null;
             }
-            return objectMapper.readValue(cachedValue, new TypeReference<ProductInfoList>() {});
+            
+            ProductInfoList cachedList = objectMapper.readValue(cachedValue, new TypeReference<ProductInfoList>() {});
+            
+            // 로컬 캐시의 좋아요 수 델타 적용
+            return applyLikeCountDelta(cachedList);
         } catch (Exception e) {
             return null;
         }
@@ -90,6 +110,9 @@ public class ProductCacheService {
 
     /**
      * 상품 상세 조회 결과를 캐시에서 조회합니다.
+     * <p>
+     * 로컬 캐시의 좋아요 수 델타를 적용하여 반환합니다.
+     * </p>
      *
      * @param productId 상품 ID
      * @return 캐시된 상품 정보 (없으면 null)
@@ -102,7 +125,11 @@ public class ProductCacheService {
             if (cachedValue == null) {
                 return null;
             }
-            return objectMapper.readValue(cachedValue, new TypeReference<ProductInfo>() {});
+            
+            ProductInfo cachedInfo = objectMapper.readValue(cachedValue, new TypeReference<ProductInfo>() {});
+            
+            // 로컬 캐시의 좋아요 수 델타 적용
+            return applyLikeCountDelta(cachedInfo);
         } catch (Exception e) {
             return null;
         }
@@ -149,6 +176,97 @@ public class ProductCacheService {
      */
     private String buildDetailCacheKey(Long productId) {
         return CACHE_KEY_PREFIX_DETAIL + productId;
+    }
+
+    /**
+     * 좋아요 수 델타를 증가시킵니다.
+     * <p>
+     * 좋아요 추가 시 호출됩니다.
+     * </p>
+     *
+     * @param productId 상품 ID
+     */
+    public void incrementLikeCountDelta(Long productId) {
+        likeCountDeltaCache.merge(productId, 1L, Long::sum);
+    }
+
+    /**
+     * 좋아요 수 델타를 감소시킵니다.
+     * <p>
+     * 좋아요 취소 시 호출됩니다.
+     * </p>
+     *
+     * @param productId 상품 ID
+     */
+    public void decrementLikeCountDelta(Long productId) {
+        likeCountDeltaCache.merge(productId, -1L, Long::sum);
+    }
+
+    /**
+     * 모든 좋아요 수 델타를 초기화합니다.
+     * <p>
+     * 배치 집계 후 호출됩니다.
+     * </p>
+     */
+    public void clearAllLikeCountDelta() {
+        likeCountDeltaCache.clear();
+    }
+
+    /**
+     * 상품 목록에 좋아요 수 델타를 적용합니다.
+     * <p>
+     * DB에서 직접 조회한 결과에도 델타를 적용하기 위해 public으로 제공합니다.
+     * </p>
+     *
+     * @param productInfoList 상품 목록
+     * @return 델타가 적용된 상품 목록
+     */
+    public ProductInfoList applyLikeCountDelta(ProductInfoList productInfoList) {
+        if (likeCountDeltaCache.isEmpty()) {
+            return productInfoList;
+        }
+
+        List<ProductInfo> updatedProducts = productInfoList.products().stream()
+            .map(this::applyLikeCountDelta)
+            .collect(Collectors.toList());
+
+        return new ProductInfoList(
+            updatedProducts,
+            productInfoList.totalCount(),
+            productInfoList.page(),
+            productInfoList.size()
+        );
+    }
+
+    /**
+     * 상품 정보에 좋아요 수 델타를 적용합니다.
+     * <p>
+     * DB에서 직접 조회한 결과에도 델타를 적용하기 위해 public으로 제공합니다.
+     * </p>
+     *
+     * @param productInfo 상품 정보
+     * @return 델타가 적용된 상품 정보
+     */
+    public ProductInfo applyLikeCountDelta(ProductInfo productInfo) {
+        Long delta = likeCountDeltaCache.get(productInfo.productDetail().getId());
+        if (delta == null || delta == 0) {
+            return productInfo;
+        }
+
+        ProductDetail originalDetail = productInfo.productDetail();
+        Long updatedLikesCount = originalDetail.getLikesCount() + delta;
+
+        ProductDetail updatedDetail = ProductDetail.of(
+            originalDetail.getId(),
+            originalDetail.getName(),
+            originalDetail.getPrice(),
+            originalDetail.getStock(),
+            originalDetail.getBrandId(),
+            originalDetail.getBrandName(),
+            updatedLikesCount
+        );
+
+        return new ProductInfo(updatedDetail);
     }
 }
 
