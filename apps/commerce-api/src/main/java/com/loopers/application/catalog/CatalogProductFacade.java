@@ -28,10 +28,12 @@ import java.util.stream.Collectors;
 public class CatalogProductFacade {
     private final ProductRepository productRepository;
     private final BrandRepository brandRepository;
+    private final ProductCacheService productCacheService;
 
     /**
      * 상품 목록을 조회합니다.
      * <p>
+     * Redis 캐시를 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
      * 배치 조회를 통해 N+1 쿼리 문제를 해결합니다.
      * </p>
      *
@@ -42,11 +44,24 @@ public class CatalogProductFacade {
      * @return 상품 목록 조회 결과
      */
     public ProductInfoList getProducts(Long brandId, String sort, int page, int size) {
+        // sort 기본값 처리 (컨트롤러와 동일하게 "latest" 사용)
+        String normalizedSort = (sort != null && !sort.isBlank()) ? sort : "latest";
+        
+        // 캐시에서 조회 시도
+        ProductInfoList cachedResult = productCacheService.getCachedProductList(brandId, normalizedSort, page, size);
+        if (cachedResult != null) {
+            return cachedResult;
+        }
+        
+        // 캐시에 없으면 DB에서 조회
         long totalCount = productRepository.countAll(brandId);
-        List<Product> products = productRepository.findAll(brandId, sort, page, size);
+        List<Product> products = productRepository.findAll(brandId, normalizedSort, page, size);
         
         if (products.isEmpty()) {
-            return new ProductInfoList(List.of(), totalCount, page, size);
+            ProductInfoList emptyResult = new ProductInfoList(List.of(), totalCount, page, size);
+            // 캐시 저장
+            productCacheService.cacheProductList(brandId, normalizedSort, page, size, emptyResult);
+            return emptyResult;
         }
         
         // ✅ 배치 조회로 N+1 쿼리 문제 해결
@@ -74,17 +89,32 @@ public class CatalogProductFacade {
             })
             .toList();
         
-        return new ProductInfoList(productsInfo, totalCount, page, size);
+        ProductInfoList result = new ProductInfoList(productsInfo, totalCount, page, size);
+        
+        // 캐시 저장
+        productCacheService.cacheProductList(brandId, normalizedSort, page, size, result);
+        
+        return result;
     }
 
     /**
      * 상품 정보를 조회합니다.
+     * <p>
+     * Redis 캐시를 먼저 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
+     * </p>
      *
      * @param productId 상품 ID
      * @return 상품 정보와 좋아요 수
      * @throws CoreException 상품을 찾을 수 없는 경우
      */
     public ProductInfo getProduct(Long productId) {
+        // 캐시에서 조회 시도
+        ProductInfo cachedResult = productCacheService.getCachedProduct(productId);
+        if (cachedResult != null) {
+            return cachedResult;
+        }
+        
+        // 캐시에 없으면 DB에서 조회
         Product product = productRepository.findById(productId)
             .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
         
@@ -98,7 +128,12 @@ public class CatalogProductFacade {
         // ProductDetail 생성 (Aggregate 경계 준수: Brand 엔티티 대신 brandName만 전달)
         ProductDetail productDetail = ProductDetail.from(product, brand.getName(), likesCount);
         
-        return new ProductInfo(productDetail);
+        ProductInfo result = new ProductInfo(productDetail);
+        
+        // 캐시에 저장
+        productCacheService.cacheProduct(productId, result);
+        
+        return result;
     }
 
 }
