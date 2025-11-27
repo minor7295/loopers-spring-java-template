@@ -18,10 +18,17 @@ Commerce API 상품 조회 부하 테스트 스크립트
     # 특정 사용자 클래스만 실행
     locust -f locustfile.py --host=http://localhost:8080 --class LowInvolvementUser
 """
-
-import random
-from locust import HttpUser, task, between, tag, events
 from typing import List
+import random
+
+from locust import (
+    HttpUser,
+    LoadTestShape,
+    between,
+    events,
+    tag,
+    task,
+)
 import requests
 
 # 테스트 시작 시 한 번만 로드되는 상품 ID 목록
@@ -125,3 +132,26 @@ class HighInvolvementUser(HttpUser):
         """
         product_id = random.randint(0, 100000)
         self.client.get(f"/api/v1/products/{product_id}")
+
+
+class BlackFridayMillionShape(LoadTestShape):
+    """
+    블랙프라이데이 알림 이후
+    100만 사용자가 몰리는 트래픽 패턴 시뮬레이션
+    """
+
+    stages = [
+        {"duration": 10, "users": 1_000_000, "spawn_rate": 200_000}, # 0~10초 사이 100만명 돌입 (극스파이크)
+        {"duration": 120, "users": 1_000_000, "spawn_rate": 1},     # 2분 유지 → 서버 버티나?
+        {"duration": 300, "users": 600_000,  "spawn_rate": 50_000}, # 일부 구매 종료로 40% 감소
+        {"duration": 480, "users": 300_000,  "spawn_rate": 20_000}, # 탐색만 하는 사용자 감소
+        {"duration": 600, "users": 50_000,   "spawn_rate": 10_000}, # 세션 종료, 급감
+        {"duration": 720, "users": 0,        "spawn_rate": 10_000}, # 완전 종료
+    ]
+
+    def tick(self):
+        run_time = self.get_run_time()
+        for stage in self.stages:
+            if run_time < stage["duration"]:
+                return stage["users"], stage["spawn_rate"]
+        return None
