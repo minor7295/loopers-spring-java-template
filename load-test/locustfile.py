@@ -63,15 +63,29 @@ class LowInvolvementUser(HttpUser):
     wait_time = between(1, 3)
     weight = 80  # 트래픽 비중
 
-    @tag("catalog")
-    @task(10)
-    def product_list_first_page(self):
-        self.client.get("/api/v1/products")
+    def _get_max_page_depth(self):
+        """
+        페이지 깊이를 결정 (깊을수록 낮은 확률)
+        지수 분포를 사용하여 대부분의 사용자는 앞 페이지만 탐색
+        """
+        rand = random.random()
+        if rand > 0.1:
+            return 0  # 80% 확률로 0페이지만
+        else:
+            return 1
 
     @tag("catalog")
-    @task(2)
-    def product_list_second_page(self):
-        self.client.get("/api/v1/products?page=1")
+    @task(10)
+    def sequential_page_browsing(self):
+        """
+        순차적으로 여러 페이지를 탐색
+        페이지가 깊어질수록 탐색하는 사용자가 적어짐
+        """
+        max_depth = self._get_max_page_depth()
+
+        # 순차적으로 페이지 탐색 (1페이지부터 max_depth까지)
+        for page in range(0, max_depth + 1):
+            self.client.get(f"/api/v1/products?page={page}")
 
     @tag("catalog")
     @task(1)
@@ -83,70 +97,75 @@ class LowInvolvementUser(HttpUser):
         self.client.get(f"/api/v1/products/{product_id}")
 
 
-# ================================
-#  High Involvement (고관여 고객)
-#  - 여러 페이지를 순차적으로 탐색
-#  - 페이지가 깊어질수록 탐색하는 사용자 수 감소
-# ================================
-class HighInvolvementUser(HttpUser):
-    wait_time = between(1, 2)
-    weight = 20  # 트래픽 비중
+# # ================================
+# #  High Involvement (고관여 고객)
+# #  - 여러 페이지를 순차적으로 탐색
+# #  - 페이지가 깊어질수록 탐색하는 사용자 수 감소
+# # ================================
+# class HighInvolvementUser(HttpUser):
+#     wait_time = between(1, 2)
+#     weight = 20  # 트래픽 비중
 
-    def _get_max_page_depth(self):
-        """
-        페이지 깊이를 결정 (깊을수록 낮은 확률)
-        지수 분포를 사용하여 대부분의 사용자는 앞 페이지만 탐색
-        """
-        rand = random.random()
-        if rand < 0.50:
-            return 3  # 50% 확률로 1페이지만
-        elif rand < 0.80:
-            return 4  # 30% 확률로 2페이지까지
-        elif rand < 0.95:
-            return 5  # 15% 확률로 3페이지까지
-        elif rand < 0.99:
-            return 6  # 4% 확률로 4페이지까지
-        else:
-            return 7
+#     def _get_max_page_depth(self):
+#         """
+#         페이지 깊이를 결정 (깊을수록 낮은 확률)
+#         지수 분포를 사용하여 대부분의 사용자는 앞 페이지만 탐색
+#         """
+#         rand = random.random()
+#         if rand < 0.50:
+#             return 3  # 50% 확률로 1페이지만
+#         elif rand < 0.80:
+#             return 4  # 30% 확률로 2페이지까지
+#         elif rand < 0.95:
+#             return 5  # 15% 확률로 3페이지까지
+#         elif rand < 0.99:
+#             return 6  # 4% 확률로 4페이지까지
+#         else:
+#             return 7
 
-    @tag("catalog")
-    @task(10)
-    def sequential_page_browsing(self):
-        """
-        순차적으로 여러 페이지를 탐색
-        페이지가 깊어질수록 탐색하는 사용자가 적어짐
-        """
-        sort_options = ["latest", "price_asc", "likes_desc"]
-        max_depth = self._get_max_page_depth()
+#     @tag("catalog")
+#     @task(10)
+#     def sequential_page_browsing(self):
+#         """
+#         순차적으로 여러 페이지를 탐색
+#         페이지가 깊어질수록 탐색하는 사용자가 적어짐
+#         """
+#         sort_options = ["latest", "price_asc", "likes_desc"]
+#         max_depth = self._get_max_page_depth()
 
-        for sort in sort_options:
-            # 순차적으로 페이지 탐색 (1페이지부터 max_depth까지)
-            for page in range(0, max_depth + 1):
-                self.client.get(f"/api/v1/products?sort={sort}&page={page}")
+#         for sort in sort_options:
+#             # 순차적으로 페이지 탐색 (1페이지부터 max_depth까지)
+#             for page in range(0, max_depth + 1):
+#                 self.client.get(f"/api/v1/products?sort={sort}&page={page}")
 
-    @tag("catalog")
-    @task(3)
-    def view_detail_from_pages(self):
-        """
-        상품 상세 조회
-        """
-        product_id = random.randint(0, 100000)
-        self.client.get(f"/api/v1/products/{product_id}")
+#     @tag("catalog")
+#     @task(3)
+#     def view_detail_from_pages(self):
+#         """
+#         상품 상세 조회
+#         """
+#         product_id = random.randint(0, 100000)
+#         self.client.get(f"/api/v1/products/{product_id}")
 
 
 class BlackFridayMillionShape(LoadTestShape):
     """
     블랙프라이데이 알림 이후
-    100만 사용자가 몰리는 트래픽 패턴 시뮬레이션
+    트래픽이 급증하는 패턴 시뮬레이션 (현실적인 수준으로 조정)
+    
+    참고: 실제 부하 테스트는 서버 리소스에 맞게 조정해야 합니다.
+    - DB 연결 풀: 25개
+    - MySQL max-connections: 30개
+    - Redis 리소스: CPU 1%, 메모리 64MB
     """
 
     stages = [
-        {"duration": 10, "users": 1_000_000, "spawn_rate": 200_000}, # 0~10초 사이 100만명 돌입 (극스파이크)
-        {"duration": 120, "users": 1_000_000, "spawn_rate": 1},     # 2분 유지 → 서버 버티나?
-        {"duration": 300, "users": 600_000,  "spawn_rate": 50_000}, # 일부 구매 종료로 40% 감소
-        {"duration": 480, "users": 300_000,  "spawn_rate": 20_000}, # 탐색만 하는 사용자 감소
-        {"duration": 600, "users": 50_000,   "spawn_rate": 10_000}, # 세션 종료, 급감
-        {"duration": 720, "users": 0,        "spawn_rate": 10_000}, # 완전 종료
+        {"duration": 30, "users": 1_000, "spawn_rate": 100},   # 0~30초: 1000명 점진적 증가
+        {"duration": 120, "users": 5_000, "spawn_rate": 200}, # 30~120초: 5000명까지 증가
+        {"duration": 300, "users": 10_000, "spawn_rate": 500}, # 120~300초: 10000명까지 증가
+        {"duration": 480, "users": 5_000, "spawn_rate": 200}, # 300~480초: 일부 종료로 감소
+        {"duration": 600, "users": 1_000, "spawn_rate": 100}, # 480~600초: 세션 종료로 급감
+        {"duration": 720, "users": 0, "spawn_rate": 50},       # 600~720초: 완전 종료
     ]
 
     def tick(self):
