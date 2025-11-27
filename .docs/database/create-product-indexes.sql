@@ -35,6 +35,11 @@ ON product(like_count);
 CREATE INDEX IF NOT EXISTS idx_product_price 
 ON product(price);
 
+-- 전체 조회 + 최신순 정렬 최적화
+-- 사용 쿼리: ORDER BY created_at DESC
+CREATE INDEX IF NOT EXISTS idx_product_created 
+ON product(created_at);
+
 -- ============================================
 -- 인덱스 생성 확인
 -- ============================================
@@ -46,5 +51,6 @@ ON product(price);
 -- - idx_product_brand_price
 -- - idx_product_likes
 -- - idx_product_price
+-- - idx_product_created
 -- ============================================
 
