@@ -26,7 +26,6 @@ services:
     command: 
       - --innodb-buffer-pool-size=96M  # 버퍼 풀을 96MB로 제한 (전체 메모리 고려)
       - --innodb-log-file-size=16M  # 로그 파일 크기 제한 (메모리 절약)
-      - --max-connections=40  # 최대 연결 수 제한 (메모리 절약)
       - --table-open-cache=200  # 테이블 캐시 크기 제한
       - --thread-cache-size=8  # 스레드 캐시 크기 제한
 
