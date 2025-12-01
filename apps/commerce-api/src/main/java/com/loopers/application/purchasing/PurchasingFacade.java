@@ -14,10 +14,13 @@ import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -32,6 +35,7 @@ import java.util.stream.Collectors;
  * 주문 생성과 결제(포인트 차감), 재고 조정, 외부 연동을 조율한다.
  * </p>
  */
+@Slf4j
 @RequiredArgsConstructor
 @Component
 public class PurchasingFacade {
@@ -42,6 +46,7 @@ public class PurchasingFacade {
     private final CouponRepository couponRepository;
     private final UserCouponRepository userCouponRepository;
     private final CouponDiscountStrategyFactory couponDiscountStrategyFactory;
+    private final PaymentGatewayClient paymentGatewayClient;
 
     /**
      * 주문을 생성한다.
@@ -49,7 +54,8 @@ public class PurchasingFacade {
      * 1. 사용자 조회 및 존재 여부 검증<br>
      * 2. 상품 재고 검증 및 차감<br>
      * 3. 사용자 포인트 검증 및 차감<br>
-     * 4. 주문 저장
+     * 4. 주문 저장<br>
+     * 5. PG 결제 요청 (비동기)
      * </p>
      * <p>
      * <b>동시성 제어 전략:</b>
@@ -81,10 +87,12 @@ public class PurchasingFacade {
      *
      * @param userId 사용자 식별자 (로그인 ID)
      * @param commands 주문 상품 정보
+     * @param cardType 카드 타입 (SAMSUNG, KB, HYUNDAI)
+     * @param cardNo 카드 번호 (xxxx-xxxx-xxxx-xxxx 형식)
      * @return 생성된 주문 정보
      */
     @Transactional
-    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands) {
+    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands, String cardType, String cardNo) {
         if (userId == null || userId.isBlank()) {
             throw new CoreException(ErrorType.BAD_REQUEST, "사용자 ID는 필수입니다.");
         }
@@ -158,6 +166,9 @@ public class PurchasingFacade {
         userRepository.save(user);
 
         Order savedOrder = orderRepository.save(order);
+
+        // PG 결제 요청 (비동기)
+        requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
 
         return OrderInfo.from(savedOrder);
     }
@@ -397,6 +408,59 @@ public class PurchasingFacade {
         return orderItems.stream()
             .mapToInt(item -> item.getPrice() * item.getQuantity())
             .sum();
+    }
+
+    /**
+     * PG 결제 게이트웨이에 결제 요청을 전송합니다.
+     * <p>
+     * 주문 저장 후 비동기로 PG 시스템에 결제 요청을 전송합니다.
+     * 실패 시에도 주문은 이미 저장되어 있으므로, 로그만 기록합니다.
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     * @param cardType 카드 타입
+     * @param cardNo 카드 번호
+     * @param amount 결제 금액
+     */
+    private void requestPaymentToGateway(String userId, Long orderId, String cardType, String cardNo, Integer amount) {
+        try {
+            // 카드 타입 변환
+            PaymentGatewayDto.CardType gatewayCardType;
+            try {
+                gatewayCardType = PaymentGatewayDto.CardType.valueOf(cardType.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("잘못된 카드 타입입니다. (cardType: {})", cardType);
+                return;
+            }
+
+            // 콜백 URL 생성 (주문 ID 기반)
+            String callbackUrl = String.format("http://localhost:8080/api/v1/orders/%d/callback", orderId);
+
+            // PG 결제 요청
+            PaymentGatewayDto.PaymentRequest request = new PaymentGatewayDto.PaymentRequest(
+                String.valueOf(orderId),
+                gatewayCardType,
+                cardNo,
+                amount.longValue(),
+                callbackUrl
+            );
+
+            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
+                paymentGatewayClient.requestPayment(userId, request);
+
+            if (response.meta().result() == PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+                && response.data() != null) {
+                log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
+                    orderId, response.data().transactionKey());
+            } else {
+                log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
+                    orderId, response.meta().errorCode(), response.meta().message());
+            }
+        } catch (Exception e) {
+            // PG API 호출 실패 시에도 주문은 이미 저장되어 있으므로, 로그만 기록
+            log.error("PG 결제 요청 중 오류 발생. (orderId: {})", orderId, e);
+        }
     }
 }
 

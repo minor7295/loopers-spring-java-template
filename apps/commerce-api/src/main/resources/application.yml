@@ -23,6 +23,9 @@ spring:
       - redis.yml
       - logging.yml
       - monitoring.yml
+
+payment-gateway:
+  url: http://localhost:8082
   batch:
     jdbc:
       initialize-schema: always # Spring Batch 메타데이터 테이블 자동 생성 (임시: production 배포 전 EDA로 교체 예정)

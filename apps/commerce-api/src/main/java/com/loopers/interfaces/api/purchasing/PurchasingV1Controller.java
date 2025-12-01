@@ -37,7 +37,12 @@ public class PurchasingV1Controller {
         @RequestHeader("X-USER-ID") String userId,
         @Valid @RequestBody PurchasingV1Dto.CreateRequest request
     ) {
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, request.toCommands());
+        OrderInfo orderInfo = purchasingFacade.createOrder(
+            userId,
+            request.toCommands(),
+            request.payment().cardType(),
+            request.payment().cardNo()
+        );
         return ApiResponse.success(PurchasingV1Dto.OrderResponse.from(orderInfo));
     }
 
