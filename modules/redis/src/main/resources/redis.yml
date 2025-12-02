@@ -3,6 +3,7 @@ spring:
     redis:
       repositories:
         enabled: false
+      timeout: 3000 # Lettuce commandTimeout (3초) - Release It! 원칙: 모든 Integration Point에 타임아웃 설정
 
 datasource:
   redis:
