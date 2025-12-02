@@ -518,9 +518,10 @@ public class PurchasingFacade {
             log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
                 orderId, method, url, e);
             
-            // 타임아웃은 외부 시스템 장애로 간주: 주문은 PENDING 상태로 유지
-            // 나중에 상태 확인 API나 콜백으로 복구 가능
-            log.info("타임아웃으로 인한 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+            // 타임아웃 발생 시에도 PG에서 실제 결제 상태를 확인하여 반영
+            // 타임아웃은 요청이 전송되었을 수 있으므로, 실제 결제 상태를 확인해야 함
+            log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
+            checkAndRecoverPaymentStatusAfterTimeout(userId, orderId);
             return null;
         } catch (FeignException e) {
             // Feign 예외 처리 (연결 실패, 서버 오류 등)
@@ -561,14 +562,138 @@ public class PurchasingFacade {
             // SocketTimeoutException 등도 여기서 처리됨
             if (e.getCause() instanceof SocketTimeoutException) {
                 log.error("PG 결제 요청 소켓 타임아웃 발생. (orderId: {})", orderId, e);
-                // 소켓 타임아웃은 외부 시스템 장애: 주문은 PENDING 상태로 유지
-                log.info("소켓 타임아웃 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                // 소켓 타임아웃 발생 시에도 PG에서 실제 결제 상태를 확인하여 반영
+                log.info("소켓 타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
+                checkAndRecoverPaymentStatusAfterTimeout(userId, orderId);
             } else {
                 log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
                 // 예상치 못한 오류도 외부 시스템 장애로 간주: 주문은 PENDING 상태로 유지
                 log.info("예상치 못한 오류 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             }
             return null;
+        }
+    }
+
+    /**
+     * 타임아웃 발생 후 PG 결제 상태를 확인하여 시스템에 반영합니다.
+     * <p>
+     * 타임아웃은 요청이 전송되었을 수 있으므로, 실제 결제 상태를 확인하여
+     * 결제가 성공했다면 주문을 완료하고, 실패했다면 주문을 취소합니다.
+     * </p>
+     * <p>
+     * <b>처리 전략:</b>
+     * <ul>
+     *   <li>타임아웃 발생 직후 즉시 상태 확인 API 호출</li>
+     *   <li>결제 상태에 따라 주문 상태 업데이트</li>
+     *   <li>상태 확인 실패 시에도 주문은 PENDING 상태로 유지 (나중에 스케줄러로 복구)</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     */
+    private void checkAndRecoverPaymentStatusAfterTimeout(String userId, Long orderId) {
+        try {
+            // 잠시 대기 후 상태 확인 (PG 처리 시간 고려)
+            // 타임아웃이 발생했지만 요청은 전송되었을 수 있으므로, 
+            // PG 시스템이 처리할 시간을 주기 위해 짧은 대기
+            Thread.sleep(1000); // 1초 대기
+            
+            // PG에서 주문별 결제 정보 조회
+            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
+                paymentGatewayClient.getTransactionsByOrder(userId, String.valueOf(orderId));
+            
+            if (response == null || response.meta() == null
+                || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+                || response.data() == null || response.data().transactions() == null
+                || response.data().transactions().isEmpty()) {
+                // PG에서 결제 정보를 찾을 수 없음: 아직 처리 중이거나 요청이 전송되지 않았을 수 있음
+                log.info("타임아웃 후 상태 확인: PG에서 결제 정보를 찾을 수 없습니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 가장 최근 트랜잭션의 상태 확인
+            PaymentGatewayDto.TransactionResponse latestTransaction = 
+                response.data().transactions().get(response.data().transactions().size() - 1);
+            
+            PaymentGatewayDto.TransactionStatus status = latestTransaction.status();
+            
+            // 별도 트랜잭션으로 상태 업데이트
+            updateOrderStatusByPaymentStatus(orderId, status, latestTransaction.transactionKey(), latestTransaction.reason());
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("타임아웃 후 상태 확인 중 인터럽트 발생. (orderId: {})", orderId);
+        } catch (FeignException e) {
+            // PG 상태 확인 API 호출 실패: 나중에 스케줄러로 복구 가능
+            log.warn("타임아웃 후 상태 확인 API 호출 실패. 나중에 스케줄러로 복구됩니다. (orderId: {})", orderId, e);
+        } catch (Exception e) {
+            // 기타 오류: 나중에 스케줄러로 복구 가능
+            log.error("타임아웃 후 상태 확인 중 오류 발생. 나중에 스케줄러로 복구됩니다. (orderId: {})", orderId, e);
+        }
+    }
+
+    /**
+     * 결제 상태에 따라 주문 상태를 업데이트합니다.
+     * <p>
+     * 별도 트랜잭션으로 실행하여 외부 시스템 호출과 독립적으로 처리합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param status 결제 상태
+     * @param transactionKey 트랜잭션 키
+     * @param reason 실패 사유 (실패 시)
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateOrderStatusByPaymentStatus(Long orderId, PaymentGatewayDto.TransactionStatus status, 
+                                                  String transactionKey, String reason) {
+        try {
+            // 주문 조회
+            Order order = orderRepository.findById(orderId)
+                .orElse(null);
+            
+            if (order == null) {
+                log.warn("주문 상태 업데이트 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
+            if (order.getStatus() == OrderStatus.COMPLETED) {
+                log.info("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            if (order.getStatus() == OrderStatus.CANCELED) {
+                log.info("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            if (status == PaymentGatewayDto.TransactionStatus.SUCCESS) {
+                // 결제 성공: 주문 완료
+                order.complete();
+                orderRepository.save(order);
+                log.info("타임아웃 후 상태 확인 결과, 주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+            } else if (status == PaymentGatewayDto.TransactionStatus.FAILED) {
+                // 결제 실패: 주문 취소 및 리소스 원복
+                User user = userJpaRepository.findById(order.getUserId())
+                    .orElse(null);
+                if (user == null) {
+                    log.warn("주문 상태 업데이트 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
+                        orderId, order.getUserId());
+                    return;
+                }
+                cancelOrder(order, user);
+                log.info("타임아웃 후 상태 확인 결과, 주문 상태를 CANCELED로 업데이트했습니다. (orderId: {}, transactionKey: {}, reason: {})",
+                    orderId, transactionKey, reason);
+            } else {
+                // PENDING 상태: 아직 처리 중
+                log.info("타임아웃 후 상태 확인 결과, 아직 처리 중입니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+            }
+        } catch (Exception e) {
+            log.error("주문 상태 업데이트 중 오류 발생. (orderId: {})", orderId, e);
+            // 예외 발생 시에도 로그만 기록 (나중에 스케줄러로 복구 가능)
         }
     }
 
