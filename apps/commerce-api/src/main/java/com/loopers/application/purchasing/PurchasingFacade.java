@@ -678,7 +678,7 @@ public class PurchasingFacade {
      * </ul>
      * </p>
      *
-     * @param userId 사용자 ID
+     * @param userId 사용자 ID (String - PG API 요구사항)
      * @param orderId 주문 ID
      */
     @Transactional
