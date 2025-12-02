@@ -20,6 +20,7 @@ import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import feign.FeignException;
 import feign.Request;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -467,12 +468,16 @@ public class PurchasingFacade {
                 log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
                     orderId, response.data().transactionKey());
             } else {
+                // PG 결제 요청 실패 응답 처리
                 String errorCode = response != null && response.meta() != null
                     ? response.meta().errorCode() : "UNKNOWN";
                 String message = response != null && response.meta() != null
                     ? response.meta().message() : "응답이 null입니다.";
                 log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
                     orderId, errorCode, message);
+                
+                // 결제 실패 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, errorCode, message);
             }
         } catch (FeignException.TimeoutException e) {
             // 타임아웃 예외 처리
@@ -481,6 +486,9 @@ public class PurchasingFacade {
             String url = request != null ? request.url() : "UNKNOWN";
             log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
                 orderId, method, url, e);
+            
+            // 타임아웃 시 주문 취소 및 리소스 원복
+            handlePaymentFailure(userId, orderId, "TIMEOUT", "PG 결제 요청 타임아웃");
         } catch (FeignException e) {
             // Feign 예외 처리 (연결 실패, 서버 오류 등)
             Request request = e.request();
@@ -492,23 +500,105 @@ public class PurchasingFacade {
                 // 서버 오류 (5xx)
                 log.error("PG 서버 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
                     orderId, status, method, url, e);
+                // 서버 오류 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, "SERVER_ERROR", 
+                    String.format("PG 서버 오류 (status: %d)", status));
             } else if (status >= 400) {
                 // 클라이언트 오류 (4xx)
                 log.warn("PG 클라이언트 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
                     orderId, status, method, url, e);
+                // 클라이언트 오류 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, "CLIENT_ERROR",
+                    String.format("PG 클라이언트 오류 (status: %d)", status));
             } else {
                 // 기타 Feign 예외
                 log.error("PG 결제 요청 중 Feign 예외 발생. (orderId: {}, status: {})",
                     orderId, status, e);
+                // 기타 예외 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, "FEIGN_ERROR",
+                    String.format("PG Feign 예외 (status: %d)", status));
             }
         } catch (Exception e) {
             // 기타 예외 처리
             // SocketTimeoutException 등도 여기서 처리됨
             if (e.getCause() instanceof SocketTimeoutException) {
                 log.error("PG 결제 요청 소켓 타임아웃 발생. (orderId: {})", orderId, e);
+                // 소켓 타임아웃 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, "SOCKET_TIMEOUT", "소켓 타임아웃");
             } else {
                 log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
+                // 예상치 못한 오류 시 주문 취소 및 리소스 원복
+                handlePaymentFailure(userId, orderId, "UNEXPECTED_ERROR", 
+                    e.getMessage() != null ? e.getMessage() : "예상치 못한 오류");
             }
+        }
+    }
+
+    /**
+     * 결제 실패 시 주문 취소 및 리소스 원복을 처리합니다.
+     * <p>
+     * 결제 요청이 실패한 경우, 이미 생성된 주문을 취소하고
+     * 차감된 포인트를 환불하며 재고를 원복합니다.
+     * </p>
+     * <p>
+     * <b>처리 내용:</b>
+     * <ul>
+     *   <li>주문 상태를 CANCELED로 변경</li>
+     *   <li>차감된 포인트 환불</li>
+     *   <li>차감된 재고 원복</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>트랜잭션 전략:</b>
+     * <ul>
+     *   <li>REQUIRES_NEW: 별도 트랜잭션으로 실행하여 외부 시스템 호출과 독립적으로 처리</li>
+     *   <li>결제 실패 처리 중 오류가 발생해도 기존 주문 생성 트랜잭션에 영향을 주지 않음</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>주의사항:</b>
+     * <ul>
+     *   <li>주문이 이미 취소되었거나 존재하지 않는 경우 로그만 기록합니다.</li>
+     *   <li>결제 실패 처리 중 오류 발생 시에도 로그만 기록합니다.</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     * @param errorCode 오류 코드
+     * @param errorMessage 오류 메시지
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void handlePaymentFailure(String userId, Long orderId, String errorCode, String errorMessage) {
+        try {
+            // 사용자 조회
+            User user = loadUser(userId);
+            
+            // 주문 조회
+            Order order = orderRepository.findById(orderId)
+                .orElse(null);
+            
+            if (order == null) {
+                log.warn("결제 실패 처리 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 이미 취소된 주문인 경우 처리하지 않음
+            if (order.getStatus() == OrderStatus.CANCELED) {
+                log.info("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 주문 취소 및 리소스 원복
+            cancelOrder(order, user);
+            
+            log.info("결제 실패로 인한 주문 취소 완료. (orderId: {}, errorCode: {}, errorMessage: {})",
+                orderId, errorCode, errorMessage);
+        } catch (Exception e) {
+            // 결제 실패 처리 중 오류 발생 시에도 로그만 기록
+            // 이미 주문은 생성되어 있으므로, 나중에 수동으로 처리할 수 있도록 로그 기록
+            log.error("결제 실패 처리 중 오류 발생. (orderId: {}, errorCode: {})",
+                orderId, errorCode, e);
         }
     }
 }
