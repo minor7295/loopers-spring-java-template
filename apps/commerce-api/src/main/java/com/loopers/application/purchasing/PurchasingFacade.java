@@ -172,15 +172,19 @@ public class PurchasingFacade {
         }
 
         Order order = Order.of(user.getId(), orderItems, couponCode, discountAmount);
+        // 주문은 PENDING 상태로 생성됨 (Order 생성자에서 기본값으로 설정)
+        // 결제 성공 후에만 COMPLETED로 변경됨
 
         decreaseStocksForOrderItems(order.getItems(), products);
         deductUserPoint(user, order.getTotalAmount());
-        order.complete();
+        // 주문은 PENDING 상태로 유지 (결제 요청 중 상태)
+        // 결제 성공 시 콜백이나 상태 확인 API를 통해 COMPLETED로 변경됨
 
         products.forEach(productRepository::save);
         userRepository.save(user);
 
         Order savedOrder = orderRepository.save(order);
+        // 주문은 PENDING 상태로 저장됨
 
         // PG 결제 요청 (비동기)
         // 성공 시 transactionKey를 저장하여 나중에 상태 확인 가능하도록 함

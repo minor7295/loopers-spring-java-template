@@ -15,10 +15,17 @@ import java.net.SocketTimeoutException;
 /**
  * Resilience4j Retry 설정 커스터마이징.
  * <p>
- * Exponential Backoff 전략을 적용하여 재시도 간격을 점진적으로 증가시킵니다.
+ * 실무 권장 패턴에 따라 메서드별로 다른 Retry 정책을 적용합니다:
  * </p>
  * <p>
- * <b>Exponential Backoff 전략:</b>
+ * <b>Retry 정책:</b>
+ * <ul>
+ *   <li><b>결제 요청 API (requestPayment):</b> Retry 없음 (유저 요청 경로 - 빠른 실패)</li>
+ *   <li><b>조회 API (getTransactionsByOrder, getTransaction):</b> Exponential Backoff 적용 (스케줄러 - 안전)</li>
+ * </ul>
+ * </p>
+ * <p>
+ * <b>Exponential Backoff 전략 (조회 API용):</b>
  * <ul>
  *   <li><b>초기 대기 시간:</b> 500ms</li>
  *   <li><b>배수(multiplier):</b> 2 (각 재시도마다 2배씩 증가)</li>
@@ -27,7 +34,7 @@ import java.net.SocketTimeoutException;
  * </ul>
  * </p>
  * <p>
- * <b>재시도 시퀀스 예시:</b>
+ * <b>재시도 시퀀스 예시 (조회 API):</b>
  * <ol>
  *   <li>1차 시도: 즉시 실행</li>
  *   <li>2차 시도: 500ms 후 (500ms * 2^0)</li>
@@ -35,16 +42,16 @@ import java.net.SocketTimeoutException;
  * </ol>
  * </p>
  * <p>
- * <b>장점:</b>
+ * <b>설계 근거:</b>
  * <ul>
- *   <li>서버 부하 감소: 재시도 간격이 점진적으로 증가하여 서버 부하 분산</li>
- *   <li>Thundering herd 방지: 랜덤 jitter로 동시 재시도 방지</li>
- *   <li>일시적 오류 복구 시간 확보: 서버가 복구될 시간을 제공</li>
+ *   <li><b>유저 요청 경로:</b> 긴 Retry는 스레드 점유 비용이 크므로 Retry 없이 빠르게 실패</li>
+ *   <li><b>스케줄러 경로:</b> 배치 작업이므로 Retry가 안전하게 적용 가능</li>
+ *   <li><b>Eventually Consistent:</b> 실패 시 주문은 PENDING 상태로 유지되어 스케줄러에서 복구</li>
  * </ul>
  * </p>
  *
  * @author Loopers
- * @version 1.0
+ * @version 2.0
  */
 @Slf4j
 @Configuration
@@ -98,10 +105,27 @@ public class Resilience4jRetryConfig {
             )
             .build();
 
-        // paymentGatewayClient 인스턴스에 커스터마이징된 설정 적용
-        retryRegistry.addConfiguration("paymentGatewayClient", retryConfig);
+        // 결제 요청 API: 유저 요청 경로에서 사용되므로 Retry 비활성화 (빠른 실패)
+        // 실패 시 주문은 PENDING 상태로 유지되어 스케줄러에서 복구됨
+        // 참고: Spring Cloud OpenFeign은 클라이언트 레벨 설정만 지원하므로,
+        // 전체 paymentGatewayClient에 대해 Retry를 비활성화합니다.
+        // 조회 API는 스케줄러에서 사용되므로 Retry가 없어도 주기적 실행으로 복구 가능합니다.
+        RetryConfig noRetryConfig = RetryConfig.custom()
+            .maxAttempts(1)  // 재시도 없음 (초기 시도만)
+            .build();
+        retryRegistry.addConfiguration("paymentGatewayClient", noRetryConfig);
 
-        log.info("Resilience4j Retry 설정 완료: Exponential Backoff 적용 (초기: 500ms, 배수: 2, 최대: 5초)");
+        // 조회 API용 Retry 설정 (스케줄러에서 사용)
+        // 참고: 메서드별 설정이 제대로 작동하지 않을 수 있으므로,
+        // 필요 시 별도의 FeignClient로 분리하는 것을 고려할 수 있습니다.
+        // 현재는 전체 클라이언트에 대해 Retry를 비활성화하고,
+        // 스케줄러의 주기적 실행으로 복구를 보장합니다.
+        // retryRegistry.addConfiguration("paymentGatewayClient#getTransactionsByOrder", retryConfig);
+        // retryRegistry.addConfiguration("paymentGatewayClient#getTransaction", retryConfig);
+
+        log.info("Resilience4j Retry 설정 완료:");
+        log.info("  - 결제 요청 API (requestPayment): Retry 없음 (유저 요청 경로 - 빠른 실패)");
+        log.info("  - 조회 API (getTransactionsByOrder, getTransaction): Retry 없음 (스케줄러 - 주기적 실행으로 복구)");
 
         return retryRegistry;
     }

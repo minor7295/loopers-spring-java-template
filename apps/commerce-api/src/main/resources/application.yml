@@ -95,12 +95,14 @@ resilience4j:
           - feign.FeignException$Forbidden       # 403 에러
           - feign.FeignException$NotFound         # 404 에러
     instances:
+      # 결제 요청 API: 유저 요청 경로에서 사용되므로 Retry 비활성화 (빠른 실패)
+      # 실패 시 주문은 PENDING 상태로 유지되어 스케줄러에서 복구됨
+      # 참고: Spring Cloud OpenFeign은 클라이언트 레벨 설정만 지원하므로,
+      # 전체 paymentGatewayClient에 대해 Retry를 비활성화합니다.
+      # 조회 API는 스케줄러에서 사용되므로 Retry가 없어도 주기적 실행으로 복구 가능합니다.
       paymentGatewayClient:
         baseConfig: default
-        maxAttempts: 3
-        # waitDuration은 Java Config(Resilience4jRetryConfig)에서 Exponential Backoff로 덮어씀
-        # Exponential Backoff: 초기 500ms → 1000ms → 최대 5초 (랜덤 jitter 포함)
-        waitDuration: 500ms # 참고용 (실제로는 Java Config의 Exponential Backoff가 적용됨)
+        maxAttempts: 1 # Retry 없음 (초기 시도만) - 유저 요청 스레드 점유 최소화
   timelimiter:
     configs:
       default:

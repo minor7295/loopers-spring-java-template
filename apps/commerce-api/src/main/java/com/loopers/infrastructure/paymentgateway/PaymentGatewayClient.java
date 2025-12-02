@@ -11,7 +11,20 @@ import org.springframework.web.bind.annotation.RequestParam;
 /**
  * PG 결제 게이트웨이 FeignClient.
  * <p>
- * CircuitBreaker와 Retry가 적용되어 있습니다.
+ * CircuitBreaker가 적용되어 있습니다.
+ * </p>
+ * <p>
+ * <b>Retry 정책:</b>
+ * <ul>
+ *   <li><b>결제 요청 API (requestPayment):</b> Retry 없음 (유저 요청 경로 - 빠른 실패)</li>
+ *   <li><b>조회 API (getTransactionsByOrder, getTransaction):</b> Retry 없음 (스케줄러 - 주기적 실행으로 복구)</li>
+ * </ul>
+ * </p>
+ * <p>
+ * <b>설계 근거:</b>
+ * 실무 권장 패턴에 따라 "실시간 API에서 긴 Retry는 하지 않는다"는 원칙을 따릅니다.
+ * 유저 요청 경로에서는 Retry 없이 빠르게 실패하고, 주문은 PENDING 상태로 유지되어
+ * 스케줄러에서 주기적으로 상태를 복구합니다.
  * </p>
  */
 @FeignClient(
