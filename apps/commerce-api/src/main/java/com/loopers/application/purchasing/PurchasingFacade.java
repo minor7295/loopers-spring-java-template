@@ -499,6 +499,13 @@ public class PurchasingFacade {
                 log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
                     orderId, errorCode, message);
                 
+                // CircuitBreaker Open 상태는 외부 시스템 장애로 간주
+                // Fallback이 호출된 경우이므로 주문을 PENDING 상태로 유지
+                if ("CIRCUIT_BREAKER_OPEN".equals(errorCode)) {
+                    log.info("CircuitBreaker가 Open 상태입니다. Fallback이 호출되었습니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                    return null; // 주문은 PENDING 상태로 유지
+                }
+                
                 // 명확한 비즈니스 실패만 주문 취소 (예: 카드 한도 초과, 잘못된 카드)
                 // 외부 시스템 장애나 일시적 오류는 주문을 PENDING 상태로 유지하여 나중에 복구 가능하도록 함
                 if (isBusinessFailure(errorCode)) {

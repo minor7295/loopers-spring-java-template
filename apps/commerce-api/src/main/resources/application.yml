@@ -71,22 +71,36 @@ resilience4j:
         minimumNumberOfCalls: 5
         waitDurationInOpenState: 10s
         failureRateThreshold: 50
+        # 실패율 임계값 50%: 최소 5번 호출 중 3번 이상 실패 시 Open 상태로 전환
+        # 이 설정은 Retry와 함께 사용될 때 적절한 균형을 제공합니다:
+        # - 너무 낮으면 (예: 30%): 정상적인 일시적 오류에도 Fallback이 과도하게 호출됨
+        # - 너무 높으면 (예: 70%): 실제 장애 상황에서 Fallback이 늦게 활성화됨
+        # 50%는 일반적인 마이크로서비스 환경에서 권장되는 값입니다
   retry:
     configs:
       default:
         maxAttempts: 3 # 최대 재시도 횟수 (초기 시도 포함)
-        waitDuration: 500ms # 재시도 대기 시간
+        waitDuration: 500ms # 재시도 대기 시간 (기본값, paymentGatewayClient는 Java Config에서 Exponential Backoff 적용)
         retryExceptions:
-          - feign.FeignException
+          # 일시적 오류만 재시도: 5xx 서버 오류, 타임아웃, 네트워크 오류
+          - feign.FeignException$InternalServerError # 500 에러
+          - feign.FeignException$ServiceUnavailable   # 503 에러
+          - feign.FeignException$GatewayTimeout      # 504 에러
           - java.net.SocketTimeoutException
           - java.util.concurrent.TimeoutException
         ignoreExceptions:
-          - feign.FeignException$NotFound # 404는 재시도하지 않음
+          # 클라이언트 오류(4xx)는 재시도하지 않음: 비즈니스 로직 오류이므로 재시도해도 성공하지 않음
+          - feign.FeignException$BadRequest      # 400 에러
+          - feign.FeignException$Unauthorized    # 401 에러
+          - feign.FeignException$Forbidden       # 403 에러
+          - feign.FeignException$NotFound         # 404 에러
     instances:
       paymentGatewayClient:
         baseConfig: default
         maxAttempts: 3
-        waitDuration: 500ms
+        # waitDuration은 Java Config(Resilience4jRetryConfig)에서 Exponential Backoff로 덮어씀
+        # Exponential Backoff: 초기 500ms → 1000ms → 최대 5초 (랜덤 jitter 포함)
+        waitDuration: 500ms # 참고용 (실제로는 Java Config의 Exponential Backoff가 적용됨)
   timelimiter:
     configs:
       default:
