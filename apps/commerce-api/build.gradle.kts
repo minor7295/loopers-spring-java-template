@@ -13,6 +13,13 @@ dependencies {
     
     // feign client
     implementation("org.springframework.cloud:spring-cloud-starter-openfeign")
+    
+    // resilience4j
+    implementation("io.github.resilience4j:resilience4j-spring-boot3")
+    implementation("io.github.resilience4j:resilience4j-circuitbreaker")
+    implementation("io.github.resilience4j:resilience4j-retry")
+    implementation("io.github.resilience4j:resilience4j-timelimiter")
+    implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
 
     // batch
     implementation("org.springframework.boot:spring-boot-starter-batch")

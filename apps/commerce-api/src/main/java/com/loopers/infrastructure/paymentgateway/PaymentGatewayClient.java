@@ -10,11 +10,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * PG 결제 게이트웨이 FeignClient.
+ * <p>
+ * CircuitBreaker와 Retry가 적용되어 있습니다.
+ * </p>
  */
 @FeignClient(
     name = "paymentGatewayClient",
     url = "${payment-gateway.url}",
-    path = "/api/v1/payments"
+    path = "/api/v1/payments",
+    fallback = PaymentGatewayClientFallback.class
 )
 public interface PaymentGatewayClient {
 

@@ -42,6 +42,60 @@ feign:
         connectTimeout: 2000 # 연결 타임아웃 (2초)
         readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
         loggerLevel: full # 로깅 레벨 (디버깅용)
+  circuitbreaker:
+    enabled: true # CircuitBreaker 활성화
+  resilience4j:
+    enabled: true # Resilience4j 활성화
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 10 # 슬라이딩 윈도우 크기
+        minimumNumberOfCalls: 5 # 최소 호출 횟수 (이 횟수 이상 호출되어야 통계 수집)
+        permittedNumberOfCallsInHalfOpenState: 3 # Half-Open 상태에서 허용되는 호출 수
+        automaticTransitionFromOpenToHalfOpenEnabled: true # 자동으로 Half-Open으로 전환
+        waitDurationInOpenState: 10s # Open 상태 유지 시간 (10초 후 Half-Open으로 전환)
+        failureRateThreshold: 50 # 실패율 임계값 (50% 이상 실패 시 Open)
+        slowCallRateThreshold: 100 # 느린 호출 비율 임계값 (100% - 모든 호출이 느림)
+        slowCallDurationThreshold: 3s # 느린 호출 기준 시간 (3초 이상)
+        recordExceptions:
+          - feign.FeignException
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+  retry:
+    configs:
+      default:
+        maxAttempts: 3 # 최대 재시도 횟수 (초기 시도 포함)
+        waitDuration: 500ms # 재시도 대기 시간
+        retryExceptions:
+          - feign.FeignException
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - feign.FeignException$NotFound # 404는 재시도하지 않음
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        maxAttempts: 3
+        waitDuration: 500ms
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 6s # 타임아웃 시간 (Feign readTimeout과 동일)
+        cancelRunningFuture: true # 실행 중인 Future 취소
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        timeoutDuration: 6s
 
 springdoc:
   use-fqn: true
