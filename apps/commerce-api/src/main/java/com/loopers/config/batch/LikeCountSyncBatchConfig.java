@@ -1,12 +1,15 @@
 package com.loopers.config.batch;
 
+import com.loopers.application.catalog.ProductCacheService;
 import com.loopers.domain.like.LikeRepository;
-import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
@@ -57,6 +60,7 @@ public class LikeCountSyncBatchConfig {
     private final PlatformTransactionManager transactionManager;
     private final ProductRepository productRepository;
     private final LikeRepository likeRepository;
+    private final ProductCacheService productCacheService;
 
     private static final int CHUNK_SIZE = 100; // 청크 크기: 100개씩 처리
 
@@ -91,6 +95,7 @@ public class LikeCountSyncBatchConfig {
             .reader(productIdReader())
             .processor(productLikeCountProcessor())
             .writer(productLikeCountWriter())
+            .listener(likeCountSyncStepListener())
             .allowStartIfComplete(true) // ✅ 완료된 Step도 재실행 가능 (스케줄러에서 주기적 실행)
             .build();
     }
@@ -155,6 +160,29 @@ public class LikeCountSyncBatchConfig {
                         item.productId(), item.likeCount(), e.getMessage());
                     // 개별 실패는 로그만 남기고 계속 진행
                 }
+            }
+        };
+    }
+
+    /**
+     * 좋아요 수 동기화 Step 완료 후 로컬 캐시를 초기화하는 Listener를 생성합니다.
+     * <p>
+     * 배치 집계가 완료되면 정확한 값으로 DB가 업데이트되므로,
+     * 로컬 캐시의 델타를 초기화하여 다음 배치까지의 델타만 추적합니다.
+     * </p>
+     *
+     * @return StepExecutionListener
+     */
+    @Bean
+    public StepExecutionListener likeCountSyncStepListener() {
+        return new StepExecutionListener() {
+            @Override
+            public ExitStatus afterStep(StepExecution stepExecution) {
+                // 배치 집계 완료 후 모든 로컬 캐시 델타 초기화
+                // 배치가 정확한 값으로 DB를 업데이트했으므로, 델타는 0부터 다시 시작
+                productCacheService.clearAllLikeCountDelta();
+                log.debug("좋아요 수 동기화 배치 완료: 로컬 캐시 델타 초기화");
+                return stepExecution.getExitStatus();
             }
         };
     }
