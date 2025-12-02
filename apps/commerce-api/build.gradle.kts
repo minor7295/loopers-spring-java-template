@@ -19,6 +19,7 @@ dependencies {
     implementation("io.github.resilience4j:resilience4j-circuitbreaker")
     implementation("io.github.resilience4j:resilience4j-retry")
     implementation("io.github.resilience4j:resilience4j-timelimiter")
+    implementation("io.github.resilience4j:resilience4j-bulkhead") // Bulkheads 패턴 구현
     implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
 
     // batch

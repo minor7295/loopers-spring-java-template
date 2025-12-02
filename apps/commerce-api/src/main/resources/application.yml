@@ -131,6 +131,20 @@ resilience4j:
       paymentGatewaySchedulerClient:
         baseConfig: default
         timeoutDuration: 6s
+  bulkhead:
+    configs:
+      default:
+        maxConcurrentCalls: 20 # 동시 호출 최대 수 (Building Resilient Distributed Systems: 격벽 패턴)
+        maxWaitDuration: 5s # 대기 시간 (5초 초과 시 BulkheadFullException 발생)
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        maxConcurrentCalls: 20 # PG 호출용 전용 격벽: 동시 호출 최대 20개로 제한
+        maxWaitDuration: 5s
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        maxConcurrentCalls: 10 # 스케줄러용 격벽: 동시 호출 최대 10개로 제한 (배치 작업이므로 더 보수적)
+        maxWaitDuration: 5s
 
 springdoc:
   use-fqn: true

@@ -11,7 +11,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 /**
  * PG 결제 게이트웨이 FeignClient.
  * <p>
- * CircuitBreaker가 적용되어 있습니다.
+ * CircuitBreaker, Bulkhead가 적용되어 있습니다.
+ * </p>
+ * <p>
+ * <b>Bulkhead 패턴:</b>
+ * <ul>
+ *   <li>동시 호출 최대 20개로 제한 (Building Resilient Distributed Systems: 격벽 패턴)</li>
+ *   <li>PG 호출 실패가 다른 API에 영향을 주지 않도록 격리</li>
+ * </ul>
  * </p>
  * <p>
  * <b>Retry 정책:</b>
