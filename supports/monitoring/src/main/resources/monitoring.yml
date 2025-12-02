@@ -12,6 +12,9 @@ management:
         include:
           - health
           - prometheus
+          - metrics
+          - circuitbreakers # Resilience4j Circuit Breaker 메트릭 노출 (Building Resilient Distributed Systems: Observability)
+          - bulkheads # Resilience4j Bulkhead 메트릭 노출 (Building Resilient Distributed Systems: Observability)
   endpoint:
     health:
       probes:
@@ -30,6 +33,8 @@ management:
       enabled: true
     readinessState:
       enabled: true
+    circuitbreakers:
+      enabled: true # Circuit Breaker Health Indicator 활성화 (Building Resilient Distributed Systems: Observability)
   server:
     port: 8081
   observations:
