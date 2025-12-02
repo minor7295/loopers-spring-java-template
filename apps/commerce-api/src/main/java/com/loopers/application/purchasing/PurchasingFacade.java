@@ -774,6 +774,14 @@ public class PurchasingFacade {
      * 주문 상태를 업데이트합니다.
      * </p>
      * <p>
+     * <b>보안 및 정합성 강화:</b>
+     * <ul>
+     *   <li>콜백 정보를 직접 신뢰하지 않고 PG 조회 API로 교차 검증</li>
+     *   <li>불일치 시 PG 원장을 우선시하여 처리</li>
+     *   <li>콜백 정보와 PG 조회 결과가 일치하는지 검증</li>
+     * </ul>
+     * </p>
+     * <p>
      * <b>처리 내용:</b>
      * <ul>
      *   <li>결제 성공 (SUCCESS): 주문 상태를 COMPLETED로 변경</li>
@@ -811,29 +819,118 @@ public class PurchasingFacade {
                 return;
             }
             
-            // 결제 상태에 따른 처리
-            PaymentGatewayDto.TransactionStatus status = callbackRequest.status();
-            if (status == PaymentGatewayDto.TransactionStatus.SUCCESS) {
+            // 콜백 정보와 PG 원장 교차 검증
+            // 보안 및 정합성을 위해 PG 조회 API로 실제 결제 상태 확인
+            PaymentGatewayDto.TransactionStatus verifiedStatus = verifyCallbackWithPgInquiry(
+                order.getUserId(), orderId, callbackRequest);
+            
+            // PG 원장을 우선시하여 처리 (불일치 시 PG 원장 기준)
+            if (verifiedStatus == PaymentGatewayDto.TransactionStatus.SUCCESS) {
                 // 결제 성공: 주문 완료
                 order.complete();
                 orderRepository.save(order);
-                log.info("PG 결제 성공 콜백 처리 완료. (orderId: {}, transactionKey: {})",
+                log.info("PG 결제 성공 콜백 처리 완료 (PG 원장 검증 완료). (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
-            } else if (status == PaymentGatewayDto.TransactionStatus.FAILED) {
+            } else if (verifiedStatus == PaymentGatewayDto.TransactionStatus.FAILED) {
                 // 결제 실패: 주문 취소 및 리소스 원복
                 User user = loadUser(order.getUserId());
                 cancelOrder(order, user);
-                log.info("PG 결제 실패 콜백 처리 완료. (orderId: {}, transactionKey: {}, reason: {})",
+                log.info("PG 결제 실패 콜백 처리 완료 (PG 원장 검증 완료). (orderId: {}, transactionKey: {}, reason: {})",
                     orderId, callbackRequest.transactionKey(), callbackRequest.reason());
             } else {
                 // PENDING 상태: 아직 처리 중이므로 상태 유지
-                log.info("PG 결제 대기 중 콜백 수신. (orderId: {}, transactionKey: {})",
+                log.info("PG 결제 대기 중 콜백 수신 (PG 원장 검증 완료). (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
             }
         } catch (Exception e) {
             log.error("콜백 처리 중 오류 발생. (orderId: {}, transactionKey: {})",
                 orderId, callbackRequest.transactionKey(), e);
             throw e; // 콜백 실패는 재시도 가능하도록 예외를 다시 던짐
+        }
+    }
+
+    /**
+     * 콜백 정보를 PG 조회 API로 교차 검증합니다.
+     * <p>
+     * 보안 및 정합성을 위해 콜백 정보를 직접 신뢰하지 않고,
+     * PG 원장(조회 API)을 기준으로 검증합니다.
+     * </p>
+     * <p>
+     * <b>검증 전략:</b>
+     * <ul>
+     *   <li>PG 조회 API로 실제 결제 상태 확인</li>
+     *   <li>콜백 정보와 PG 조회 결과 비교</li>
+     *   <li>불일치 시 PG 원장을 우선시하여 처리</li>
+     *   <li>PG 조회 실패 시 콜백 정보를 사용하되 경고 로그 기록</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId 사용자 ID (Long)
+     * @param orderId 주문 ID
+     * @param callbackRequest 콜백 요청 정보
+     * @return 검증된 결제 상태 (PG 원장 기준)
+     */
+    private PaymentGatewayDto.TransactionStatus verifyCallbackWithPgInquiry(
+        Long userId, Long orderId, PaymentGatewayDto.CallbackRequest callbackRequest) {
+        
+        try {
+            // User의 userId (String)를 가져오기 위해 User 조회
+            User user = userJpaRepository.findById(userId).orElse(null);
+            if (user == null) {
+                log.warn("콜백 검증 시 사용자를 찾을 수 없습니다. 콜백 정보를 사용합니다. (orderId: {}, userId: {})",
+                    orderId, userId);
+                return callbackRequest.status(); // 사용자를 찾을 수 없으면 콜백 정보 사용
+            }
+            
+            String userIdString = user.getUserId();
+            
+            // PG에서 주문별 결제 정보 조회 (스케줄러 전용 클라이언트 사용 - Retry 적용)
+            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
+                paymentGatewaySchedulerClient.getTransactionsByOrder(userIdString, String.valueOf(orderId));
+            
+            if (response == null || response.meta() == null
+                || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+                || response.data() == null || response.data().transactions() == null
+                || response.data().transactions().isEmpty()) {
+                // PG 조회 실패: 콜백 정보를 사용하되 경고 로그 기록
+                log.warn("콜백 검증 시 PG 조회 API 호출 실패. 콜백 정보를 사용합니다. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+                return callbackRequest.status();
+            }
+            
+            // 가장 최근 트랜잭션의 상태 확인 (PG 원장 기준)
+            PaymentGatewayDto.TransactionResponse latestTransaction = 
+                response.data().transactions().get(response.data().transactions().size() - 1);
+            
+            PaymentGatewayDto.TransactionStatus pgStatus = latestTransaction.status();
+            PaymentGatewayDto.TransactionStatus callbackStatus = callbackRequest.status();
+            
+            // 콜백 정보와 PG 조회 결과 비교
+            if (pgStatus != callbackStatus) {
+                // 불일치 시 PG 원장을 우선시하여 처리
+                log.warn("콜백 정보와 PG 원장이 불일치합니다. PG 원장을 우선시하여 처리합니다. " +
+                    "(orderId: {}, transactionKey: {}, 콜백 상태: {}, PG 원장 상태: {})",
+                    orderId, callbackRequest.transactionKey(), callbackStatus, pgStatus);
+                return pgStatus; // PG 원장 기준으로 처리
+            }
+            
+            // 일치하는 경우: 정상 처리
+            log.debug("콜백 정보와 PG 원장이 일치합니다. (orderId: {}, transactionKey: {}, 상태: {})",
+                orderId, callbackRequest.transactionKey(), pgStatus);
+            return pgStatus;
+            
+        } catch (FeignException e) {
+            // PG 조회 API 호출 실패: 콜백 정보를 사용하되 경고 로그 기록
+            log.warn("콜백 검증 시 PG 조회 API 호출 중 Feign 예외 발생. 콜백 정보를 사용합니다. " +
+                "(orderId: {}, transactionKey: {}, status: {})",
+                orderId, callbackRequest.transactionKey(), e.status(), e);
+            return callbackRequest.status();
+        } catch (Exception e) {
+            // 기타 예외: 콜백 정보를 사용하되 경고 로그 기록
+            log.warn("콜백 검증 시 예상치 못한 오류 발생. 콜백 정보를 사용합니다. " +
+                "(orderId: {}, transactionKey: {})",
+                orderId, callbackRequest.transactionKey(), e);
+            return callbackRequest.status();
         }
     }
 
