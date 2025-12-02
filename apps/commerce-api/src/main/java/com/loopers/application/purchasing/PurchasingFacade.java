@@ -18,11 +18,14 @@ import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
+import feign.FeignException;
+import feign.Request;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -416,6 +419,15 @@ public class PurchasingFacade {
      * 주문 저장 후 비동기로 PG 시스템에 결제 요청을 전송합니다.
      * 실패 시에도 주문은 이미 저장되어 있으므로, 로그만 기록합니다.
      * </p>
+     * <p>
+     * <b>예외 처리 전략:</b>
+     * <ul>
+     *   <li><b>타임아웃:</b> FeignException.TimeoutException, SocketTimeoutException 처리</li>
+     *   <li><b>연결 실패:</b> FeignException.ConnectException 처리</li>
+     *   <li><b>서버 오류:</b> FeignException (4xx, 5xx) 처리</li>
+     *   <li><b>기타 예외:</b> 일반 Exception 처리</li>
+     * </ul>
+     * </p>
      *
      * @param userId 사용자 ID
      * @param orderId 주문 ID
@@ -430,7 +442,7 @@ public class PurchasingFacade {
             try {
                 gatewayCardType = PaymentGatewayDto.CardType.valueOf(cardType.toUpperCase());
             } catch (IllegalArgumentException e) {
-                log.warn("잘못된 카드 타입입니다. (cardType: {})", cardType);
+                log.warn("잘못된 카드 타입입니다. (orderId: {}, cardType: {})", orderId, cardType);
                 return;
             }
 
@@ -449,17 +461,54 @@ public class PurchasingFacade {
             PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
                 paymentGatewayClient.requestPayment(userId, request);
 
-            if (response.meta().result() == PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+            if (response != null && response.meta() != null
+                && response.meta().result() == PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
                 && response.data() != null) {
                 log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
                     orderId, response.data().transactionKey());
             } else {
+                String errorCode = response != null && response.meta() != null
+                    ? response.meta().errorCode() : "UNKNOWN";
+                String message = response != null && response.meta() != null
+                    ? response.meta().message() : "응답이 null입니다.";
                 log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
-                    orderId, response.meta().errorCode(), response.meta().message());
+                    orderId, errorCode, message);
+            }
+        } catch (FeignException.TimeoutException e) {
+            // 타임아웃 예외 처리
+            Request request = e.request();
+            String method = request != null ? request.httpMethod().name() : "UNKNOWN";
+            String url = request != null ? request.url() : "UNKNOWN";
+            log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
+                orderId, method, url, e);
+        } catch (FeignException e) {
+            // Feign 예외 처리 (연결 실패, 서버 오류 등)
+            Request request = e.request();
+            int status = e.status();
+            String method = request != null ? request.httpMethod().name() : "UNKNOWN";
+            String url = request != null ? request.url() : "UNKNOWN";
+            
+            if (status >= 500) {
+                // 서버 오류 (5xx)
+                log.error("PG 서버 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
+                    orderId, status, method, url, e);
+            } else if (status >= 400) {
+                // 클라이언트 오류 (4xx)
+                log.warn("PG 클라이언트 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
+                    orderId, status, method, url, e);
+            } else {
+                // 기타 Feign 예외
+                log.error("PG 결제 요청 중 Feign 예외 발생. (orderId: {}, status: {})",
+                    orderId, status, e);
             }
         } catch (Exception e) {
-            // PG API 호출 실패 시에도 주문은 이미 저장되어 있으므로, 로그만 기록
-            log.error("PG 결제 요청 중 오류 발생. (orderId: {})", orderId, e);
+            // 기타 예외 처리
+            // SocketTimeoutException 등도 여기서 처리됨
+            if (e.getCause() instanceof SocketTimeoutException) {
+                log.error("PG 결제 요청 소켓 타임아웃 발생. (orderId: {})", orderId, e);
+            } else {
+                log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
+            }
         }
     }
 }
