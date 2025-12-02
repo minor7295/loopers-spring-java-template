@@ -175,11 +175,23 @@ public class PurchasingFacade {
 
         // PG 결제 요청 (비동기)
         // 성공 시 transactionKey를 저장하여 나중에 상태 확인 가능하도록 함
-        String transactionKey = requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
-        if (transactionKey != null) {
-            // TODO: 주문에 transactionKey를 저장하는 필드가 있다면 저장
-            // 현재는 주문 ID로 PG에서 결제 정보를 조회할 수 있으므로 일단 로그만 기록
-            log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", savedOrder.getId(), transactionKey);
+        // 실패 시에도 주문은 PENDING 상태로 유지되어 나중에 복구 가능
+        try {
+            String transactionKey = requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
+            if (transactionKey != null) {
+                // TODO: 주문에 transactionKey를 저장하는 필드가 있다면 저장
+                // 현재는 주문 ID로 PG에서 결제 정보를 조회할 수 있으므로 일단 로그만 기록
+                log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", savedOrder.getId(), transactionKey);
+            } else {
+                // PG 요청 실패: 외부 시스템 장애로 간주
+                // 주문은 PENDING 상태로 유지되어 나중에 상태 확인 API나 콜백으로 복구 가능
+                log.info("PG 결제 요청 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", savedOrder.getId());
+            }
+        } catch (Exception e) {
+            // PG 요청 중 예외 발생 시에도 주문은 이미 저장되어 있으므로 유지
+            // 외부 시스템 장애는 내부 시스템에 영향을 주지 않도록 함
+            log.error("PG 결제 요청 중 예외 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", 
+                savedOrder.getId(), e);
         }
 
         return OrderInfo.from(savedOrder);
@@ -487,8 +499,15 @@ public class PurchasingFacade {
                 log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
                     orderId, errorCode, message);
                 
-                // 결제 실패 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, errorCode, message);
+                // 명확한 비즈니스 실패만 주문 취소 (예: 카드 한도 초과, 잘못된 카드)
+                // 외부 시스템 장애나 일시적 오류는 주문을 PENDING 상태로 유지하여 나중에 복구 가능하도록 함
+                if (isBusinessFailure(errorCode)) {
+                    handlePaymentFailure(userId, orderId, errorCode, message);
+                } else {
+                    // 외부 시스템 장애: 주문은 PENDING 상태로 유지, 나중에 상태 확인 API로 복구 가능
+                    log.info("외부 시스템 장애로 인한 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, errorCode: {})",
+                        orderId, errorCode);
+                }
                 return null;
             }
         } catch (FeignException.TimeoutException e) {
@@ -499,8 +518,9 @@ public class PurchasingFacade {
             log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
                 orderId, method, url, e);
             
-            // 타임아웃 시 주문 취소 및 리소스 원복
-            handlePaymentFailure(userId, orderId, "TIMEOUT", "PG 결제 요청 타임아웃");
+            // 타임아웃은 외부 시스템 장애로 간주: 주문은 PENDING 상태로 유지
+            // 나중에 상태 확인 API나 콜백으로 복구 가능
+            log.info("타임아웃으로 인한 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             return null;
         } catch (FeignException e) {
             // Feign 예외 처리 (연결 실패, 서버 오류 등)
@@ -510,26 +530,30 @@ public class PurchasingFacade {
             String url = request != null ? request.url() : "UNKNOWN";
             
             if (status >= 500) {
-                // 서버 오류 (5xx)
+                // 서버 오류 (5xx): 외부 시스템 장애로 간주
                 log.error("PG 서버 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
                     orderId, status, method, url, e);
-                // 서버 오류 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, "SERVER_ERROR", 
-                    String.format("PG 서버 오류 (status: %d)", status));
+                // 서버 오류는 외부 시스템 장애: 주문은 PENDING 상태로 유지
+                log.info("서버 오류로 인한 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             } else if (status >= 400) {
-                // 클라이언트 오류 (4xx)
+                // 클라이언트 오류 (4xx): 일부는 비즈니스 실패, 일부는 외부 시스템 장애
                 log.warn("PG 클라이언트 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
                     orderId, status, method, url, e);
-                // 클라이언트 오류 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, "CLIENT_ERROR",
-                    String.format("PG 클라이언트 오류 (status: %d)", status));
+                // 400 Bad Request는 비즈니스 실패로 간주할 수 있지만, 
+                // 외부 시스템 장애일 수도 있으므로 주문은 유지 (나중에 복구 가능)
+                if (status == 400) {
+                    // 400은 비즈니스 실패 가능성이 높지만, 안전하게 주문 유지
+                    log.info("클라이언트 오류(400) 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                } else {
+                    // 401, 403 등은 외부 시스템 장애로 간주
+                    log.info("클라이언트 오류({}) 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", 
+                        status, orderId);
+                }
             } else {
-                // 기타 Feign 예외
+                // 기타 Feign 예외: 외부 시스템 장애로 간주
                 log.error("PG 결제 요청 중 Feign 예외 발생. (orderId: {}, status: {})",
                     orderId, status, e);
-                // 기타 예외 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, "FEIGN_ERROR",
-                    String.format("PG Feign 예외 (status: %d)", status));
+                log.info("Feign 예외 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             }
             return null;
         } catch (Exception e) {
@@ -537,16 +561,36 @@ public class PurchasingFacade {
             // SocketTimeoutException 등도 여기서 처리됨
             if (e.getCause() instanceof SocketTimeoutException) {
                 log.error("PG 결제 요청 소켓 타임아웃 발생. (orderId: {})", orderId, e);
-                // 소켓 타임아웃 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, "SOCKET_TIMEOUT", "소켓 타임아웃");
+                // 소켓 타임아웃은 외부 시스템 장애: 주문은 PENDING 상태로 유지
+                log.info("소켓 타임아웃 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             } else {
                 log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
-                // 예상치 못한 오류 시 주문 취소 및 리소스 원복
-                handlePaymentFailure(userId, orderId, "UNEXPECTED_ERROR", 
-                    e.getMessage() != null ? e.getMessage() : "예상치 못한 오류");
+                // 예상치 못한 오류도 외부 시스템 장애로 간주: 주문은 PENDING 상태로 유지
+                log.info("예상치 못한 오류 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             }
             return null;
         }
+    }
+
+    /**
+     * 오류 코드가 명확한 비즈니스 실패인지 확인합니다.
+     * <p>
+     * 비즈니스 실패는 주문을 취소해야 하지만,
+     * 외부 시스템 장애는 주문을 PENDING 상태로 유지하여 나중에 복구할 수 있도록 합니다.
+     * </p>
+     *
+     * @param errorCode 오류 코드
+     * @return 비즈니스 실패인 경우 true, 외부 시스템 장애인 경우 false
+     */
+    private boolean isBusinessFailure(String errorCode) {
+        // 명확한 비즈니스 실패 오류 코드만 취소 처리
+        // 예: 카드 한도 초과, 잘못된 카드 번호 등
+        return errorCode != null && (
+            errorCode.contains("LIMIT_EXCEEDED") ||
+            errorCode.contains("INVALID_CARD") ||
+            errorCode.contains("CARD_ERROR") ||
+            errorCode.contains("INSUFFICIENT_FUNDS")
+        );
     }
 
     /**
