@@ -16,6 +16,7 @@ dependencies {
     
     // resilience4j
     implementation("io.github.resilience4j:resilience4j-spring-boot3")
+    implementation("io.github.resilience4j:resilience4j-core") // IntervalFunction을 위한 core 모듈
     implementation("io.github.resilience4j:resilience4j-circuitbreaker")
     implementation("io.github.resilience4j:resilience4j-retry")
     implementation("io.github.resilience4j:resilience4j-timelimiter")

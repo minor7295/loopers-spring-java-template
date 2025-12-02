@@ -8,6 +8,7 @@ import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
 import com.loopers.domain.order.OrderRepository;
+import com.loopers.domain.order.OrderStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
@@ -33,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -458,7 +460,7 @@ public class PurchasingFacade {
      * <p>
      * <b>예외 처리 전략:</b>
      * <ul>
-     *   <li><b>타임아웃:</b> FeignException.TimeoutException, SocketTimeoutException 처리</li>
+     *   <li><b>타임아웃:</b> SocketTimeoutException, TimeoutException 처리</li>
      *   <li><b>연결 실패:</b> FeignException.ConnectException 처리</li>
      *   <li><b>서버 오류:</b> FeignException (4xx, 5xx) 처리</li>
      *   <li><b>기타 예외:</b> 일반 Exception 처리</li>
@@ -480,7 +482,7 @@ public class PurchasingFacade {
                 gatewayCardType = PaymentGatewayDto.CardType.valueOf(cardType.toUpperCase());
             } catch (IllegalArgumentException e) {
                 log.warn("잘못된 카드 타입입니다. (orderId: {}, cardType: {})", orderId, cardType);
-                return;
+                return null;
             }
 
             // 콜백 URL 생성 (주문 ID 기반)
@@ -532,25 +534,30 @@ public class PurchasingFacade {
                 }
                 return null;
             }
-        } catch (FeignException.TimeoutException e) {
-            // 타임아웃 예외 처리
-            Request request = e.request();
-            String method = request != null ? request.httpMethod().name() : "UNKNOWN";
-            String url = request != null ? request.url() : "UNKNOWN";
-            log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
-                orderId, method, url, e);
-            
-            // 타임아웃 발생 시에도 PG에서 실제 결제 상태를 확인하여 반영
-            // 타임아웃은 요청이 전송되었을 수 있으므로, 실제 결제 상태를 확인해야 함
-            log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
-            checkAndRecoverPaymentStatusAfterTimeout(userId, orderId);
-            return null;
         } catch (FeignException e) {
-            // Feign 예외 처리 (연결 실패, 서버 오류 등)
+            // Feign 예외 처리 (연결 실패, 서버 오류, 타임아웃 등)
             Request request = e.request();
             int status = e.status();
             String method = request != null ? request.httpMethod().name() : "UNKNOWN";
             String url = request != null ? request.url() : "UNKNOWN";
+            
+            // 타임아웃 예외 확인 (원인으로 SocketTimeoutException 또는 TimeoutException이 있는 경우)
+            Throwable cause = e.getCause();
+            boolean isTimeout = cause instanceof SocketTimeoutException || 
+                               cause instanceof TimeoutException ||
+                               (e.getMessage() != null && e.getMessage().contains("timeout"));
+            
+            if (isTimeout) {
+                // 타임아웃 예외 처리
+                log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
+                    orderId, method, url, e);
+                
+                // 타임아웃 발생 시에도 PG에서 실제 결제 상태를 확인하여 반영
+                // 타임아웃은 요청이 전송되었을 수 있으므로, 실제 결제 상태를 확인해야 함
+                log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
+                checkAndRecoverPaymentStatusAfterTimeout(userId, orderId);
+                return null;
+            }
             
             if (status >= 500) {
                 // 서버 오류 (5xx): 외부 시스템 장애로 간주
@@ -833,7 +840,8 @@ public class PurchasingFacade {
                     orderId, callbackRequest.transactionKey());
             } else if (verifiedStatus == PaymentGatewayDto.TransactionStatus.FAILED) {
                 // 결제 실패: 주문 취소 및 리소스 원복
-                User user = loadUser(order.getUserId());
+                User user = userJpaRepository.findById(order.getUserId())
+                    .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다."));
                 cancelOrder(order, user);
                 log.info("PG 결제 실패 콜백 처리 완료 (PG 원장 검증 완료). (orderId: {}, transactionKey: {}, reason: {})",
                     orderId, callbackRequest.transactionKey(), callbackRequest.reason());

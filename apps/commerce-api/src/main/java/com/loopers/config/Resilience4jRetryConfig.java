@@ -2,9 +2,9 @@ package com.loopers.config;
 
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
-import io.github.resilience4j.retry.IntervalFunction;
+import io.github.resilience4j.core.IntervalFunction;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -64,11 +64,11 @@ public class Resilience4jRetryConfig {
      * Exponential Backoff 전략을 적용하여 재시도 간격을 점진적으로 증가시킵니다.
      * </p>
      *
-     * @param retryRegistry Resilience4j RetryRegistry
      * @return RetryRegistry (커스터마이징된 설정이 적용됨)
      */
     @Bean
-    public RetryRegistry retryRegistry(RetryRegistry retryRegistry) {
+    public RetryRegistry retryRegistry() {
+        RetryRegistry retryRegistry = io.github.resilience4j.retry.RetryRegistry.ofDefaults();
         // Exponential Backoff 설정
         // - 초기 대기 시간: 500ms
         // - 배수: 2 (각 재시도마다 2배씩 증가)
@@ -87,23 +87,25 @@ public class Resilience4jRetryConfig {
             .intervalFunction(intervalFunction)  // Exponential Backoff 적용
             .retryOnException(throwable -> {
                 // 일시적 오류만 재시도: 5xx 서버 오류, 타임아웃, 네트워크 오류
-                if (throwable instanceof FeignException.InternalServerError ||
-                    throwable instanceof FeignException.ServiceUnavailable ||
-                    throwable instanceof FeignException.GatewayTimeout ||
-                    throwable instanceof SocketTimeoutException ||
+                if (throwable instanceof FeignException feignException) {
+                    int status = feignException.status();
+                    // 5xx 서버 오류만 재시도
+                    if (status >= 500 && status < 600) {
+                        log.debug("재시도 대상 예외: FeignException (status: {})", status);
+                        return true;
+                    }
+                    return false;
+                }
+                if (throwable instanceof SocketTimeoutException ||
                     throwable instanceof TimeoutException) {
                     log.debug("재시도 대상 예외: {}", throwable.getClass().getSimpleName());
                     return true;
                 }
                 return false;
             })
-            .ignoreExceptions(
-                // 클라이언트 오류(4xx)는 재시도하지 않음: 비즈니스 로직 오류이므로 재시도해도 성공하지 않음
-                FeignException.BadRequest.class,
-                FeignException.Unauthorized.class,
-                FeignException.Forbidden.class,
-                FeignException.NotFound.class
-            )
+            // ignoreExceptions는 사용하지 않음
+            // retryOnException에서 5xx만 재시도하고 4xx는 제외하므로,
+            // 별도로 ignoreExceptions를 설정할 필요가 없음
             .build();
 
         // 결제 요청 API: 유저 요청 경로에서 사용되므로 Retry 비활성화 (빠른 실패)

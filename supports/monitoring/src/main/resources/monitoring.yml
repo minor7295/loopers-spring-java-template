@@ -38,7 +38,7 @@ management:
           show-components: always
           include:
             - livenessState
-            - paymentGateway # PG 서비스 Health Indicator 포함 (Building Resilient Distributed Systems: Health Checks)
+            - readinessState
     prometheus:
       access: read_only
   health:

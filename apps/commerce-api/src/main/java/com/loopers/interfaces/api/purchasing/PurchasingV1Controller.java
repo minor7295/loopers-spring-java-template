@@ -90,7 +90,7 @@ public class PurchasingV1Controller {
         @RequestBody PaymentGatewayDto.CallbackRequest callbackRequest
     ) {
         purchasingFacade.handlePaymentCallback(orderId, callbackRequest);
-        return ApiResponse.success();
+        return ApiResponse.successVoid();
     }
 
     /**
@@ -106,7 +106,7 @@ public class PurchasingV1Controller {
         @PathVariable Long orderId
     ) {
         purchasingFacade.recoverOrderStatusByPaymentCheck(userId, orderId);
-        return ApiResponse.success();
+        return ApiResponse.successVoid();
     }
 }
 
