@@ -232,7 +232,7 @@ class PurchasingFacadeRetryTest {
     }
 
     @Test
-    @DisplayName("PG 재시도 간격(backoff)이 적용된다")
+    @DisplayName("PG 재시도 간격(Exponential Backoff)이 적용된다")
     void createOrder_retryWithBackoff_backoffApplied() throws InterruptedException {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
@@ -286,9 +286,15 @@ class PurchasingFacadeRetryTest {
         // assert
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
         
-        // 재시도 간격이 적용되었는지 확인 (최소 backoff 시간 이상 소요)
-        long minBackoffTime = 100; // 설정값에 따라 다를 수 있음 (ms)
+        // Exponential Backoff가 적용되었는지 확인
+        // Exponential Backoff 설정: 초기 500ms, 배수 2, 최대 5초 (랜덤 jitter 포함)
+        // 첫 번째 재시도는 최소 500ms 이상 소요되어야 함 (랜덤 jitter로 인해 더 길 수 있음)
+        long minBackoffTime = 400; // 최소 대기 시간 (랜덤 jitter를 고려하여 약간 낮게 설정)
         assertThat(elapsedTime).isGreaterThanOrEqualTo(minBackoffTime);
+        
+        // 재시도가 수행되었는지 확인 (최소 2번 호출)
+        verify(paymentGatewayClient, atLeast(2))
+            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
     }
 
     @Test
