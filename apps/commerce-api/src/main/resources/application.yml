@@ -42,6 +42,10 @@ feign:
         connectTimeout: 2000 # 연결 타임아웃 (2초)
         readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
         loggerLevel: full # 로깅 레벨 (디버깅용)
+      paymentGatewaySchedulerClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
   circuitbreaker:
     enabled: true # CircuitBreaker 활성화
   resilience4j:
@@ -76,6 +80,12 @@ resilience4j:
         # - 너무 낮으면 (예: 30%): 정상적인 일시적 오류에도 Fallback이 과도하게 호출됨
         # - 너무 높으면 (예: 70%): 실제 장애 상황에서 Fallback이 늦게 활성화됨
         # 50%는 일반적인 마이크로서비스 환경에서 권장되는 값입니다
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
   retry:
     configs:
       default:
@@ -97,12 +107,14 @@ resilience4j:
     instances:
       # 결제 요청 API: 유저 요청 경로에서 사용되므로 Retry 비활성화 (빠른 실패)
       # 실패 시 주문은 PENDING 상태로 유지되어 스케줄러에서 복구됨
-      # 참고: Spring Cloud OpenFeign은 클라이언트 레벨 설정만 지원하므로,
-      # 전체 paymentGatewayClient에 대해 Retry를 비활성화합니다.
-      # 조회 API는 스케줄러에서 사용되므로 Retry가 없어도 주기적 실행으로 복구 가능합니다.
       paymentGatewayClient:
         baseConfig: default
         maxAttempts: 1 # Retry 없음 (초기 시도만) - 유저 요청 스레드 점유 최소화
+      # 스케줄러 전용 클라이언트: 비동기/배치 기반으로 Retry 적용 (Exponential Backoff)
+      # Java Config(Resilience4jRetryConfig)에서 Exponential Backoff 설정이 적용됩니다.
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        maxAttempts: 3 # Retry 적용 (Exponential Backoff: 500ms → 1000ms)
   timelimiter:
     configs:
       default:
@@ -110,6 +122,9 @@ resilience4j:
         cancelRunningFuture: true # 실행 중인 Future 취소
     instances:
       paymentGatewayClient:
+        baseConfig: default
+        timeoutDuration: 6s
+      paymentGatewaySchedulerClient:
         baseConfig: default
         timeoutDuration: 6s
 

@@ -16,6 +16,7 @@ import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
 import com.loopers.infrastructure.user.UserJpaRepository;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewaySchedulerClient;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -61,7 +62,8 @@ public class PurchasingFacade {
     private final CouponRepository couponRepository;
     private final UserCouponRepository userCouponRepository;
     private final CouponDiscountStrategyFactory couponDiscountStrategyFactory;
-    private final PaymentGatewayClient paymentGatewayClient;
+    private final PaymentGatewayClient paymentGatewayClient; // 유저 요청 경로용 (Retry 없음)
+    private final PaymentGatewaySchedulerClient paymentGatewaySchedulerClient; // 스케줄러용 (Retry 적용)
 
     /**
      * 주문을 생성한다.
@@ -619,9 +621,9 @@ public class PurchasingFacade {
             // PG 시스템이 처리할 시간을 주기 위해 짧은 대기
             Thread.sleep(1000); // 1초 대기
             
-            // PG에서 주문별 결제 정보 조회
+            // PG에서 주문별 결제 정보 조회 (스케줄러 전용 클라이언트 사용 - Retry 적용)
             PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
-                paymentGatewayClient.getTransactionsByOrder(userId, String.valueOf(orderId));
+                paymentGatewaySchedulerClient.getTransactionsByOrder(userId, String.valueOf(orderId));
             
             if (response == null || response.meta() == null
                 || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
@@ -876,9 +878,9 @@ public class PurchasingFacade {
                 return;
             }
             
-            // PG에서 주문별 결제 정보 조회
+            // PG에서 주문별 결제 정보 조회 (스케줄러 전용 클라이언트 사용 - Retry 적용)
             PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
-                paymentGatewayClient.getTransactionsByOrder(userId, String.valueOf(orderId));
+                paymentGatewaySchedulerClient.getTransactionsByOrder(userId, String.valueOf(orderId));
             
             if (response == null || response.meta() == null
                 || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
