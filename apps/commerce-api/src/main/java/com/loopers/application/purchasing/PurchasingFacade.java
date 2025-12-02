@@ -45,6 +45,15 @@ import java.util.stream.Collectors;
 @Component
 public class PurchasingFacade {
 
+    /**
+     * CircuitBreaker가 Open 상태일 때 Fallback이 반환하는 에러 코드.
+     * <p>
+     * 이 에러 코드는 외부 시스템 장애를 나타내며, 비즈니스 실패가 아닙니다.
+     * 따라서 주문을 취소하지 않고 PENDING 상태로 유지하여 나중에 복구할 수 있도록 합니다.
+     * </p>
+     */
+    private static final String ERROR_CODE_CIRCUIT_BREAKER_OPEN = "CIRCUIT_BREAKER_OPEN";
+
     private final UserRepository userRepository;
     private final UserJpaRepository userJpaRepository;
     private final ProductRepository productRepository;
@@ -501,7 +510,7 @@ public class PurchasingFacade {
                 
                 // CircuitBreaker Open 상태는 외부 시스템 장애로 간주
                 // Fallback이 호출된 경우이므로 주문을 PENDING 상태로 유지
-                if ("CIRCUIT_BREAKER_OPEN".equals(errorCode)) {
+                if (ERROR_CODE_CIRCUIT_BREAKER_OPEN.equals(errorCode)) {
                     log.info("CircuitBreaker가 Open 상태입니다. Fallback이 호출되었습니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
                     return null; // 주문은 PENDING 상태로 유지
                 }
@@ -710,19 +719,46 @@ public class PurchasingFacade {
      * 비즈니스 실패는 주문을 취소해야 하지만,
      * 외부 시스템 장애는 주문을 PENDING 상태로 유지하여 나중에 복구할 수 있도록 합니다.
      * </p>
+     * <p>
+     * <b>비즈니스 실패 예시:</b>
+     * <ul>
+     *   <li>카드 한도 초과 (LIMIT_EXCEEDED)</li>
+     *   <li>잘못된 카드 번호 (INVALID_CARD)</li>
+     *   <li>카드 오류 (CARD_ERROR)</li>
+     *   <li>잔액 부족 (INSUFFICIENT_FUNDS)</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>외부 시스템 장애 예시:</b>
+     * <ul>
+     *   <li>CircuitBreaker Open (CIRCUIT_BREAKER_OPEN)</li>
+     *   <li>서버 오류 (5xx)</li>
+     *   <li>타임아웃</li>
+     *   <li>네트워크 오류</li>
+     * </ul>
+     * </p>
      *
      * @param errorCode 오류 코드
      * @return 비즈니스 실패인 경우 true, 외부 시스템 장애인 경우 false
      */
     private boolean isBusinessFailure(String errorCode) {
+        // null 체크
+        if (errorCode == null) {
+            return false;
+        }
+        
+        // CircuitBreaker Open 상태는 명시적으로 외부 시스템 장애로 간주
+        if (ERROR_CODE_CIRCUIT_BREAKER_OPEN.equals(errorCode)) {
+            return false;
+        }
+        
         // 명확한 비즈니스 실패 오류 코드만 취소 처리
         // 예: 카드 한도 초과, 잘못된 카드 번호 등
-        return errorCode != null && (
-            errorCode.contains("LIMIT_EXCEEDED") ||
+        return errorCode.contains("LIMIT_EXCEEDED") ||
             errorCode.contains("INVALID_CARD") ||
             errorCode.contains("CARD_ERROR") ||
-            errorCode.contains("INSUFFICIENT_FUNDS")
-        );
+            errorCode.contains("INSUFFICIENT_FUNDS") ||
+            errorCode.contains("PAYMENT_FAILED"); // 명시적인 결제 실패도 비즈니스 실패로 간주
     }
 
     /**
