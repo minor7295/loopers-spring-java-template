@@ -71,6 +71,20 @@ public class PaymentGatewayDto {
     }
 
     /**
+     * PG 콜백 요청 DTO (PG에서 보내는 TransactionInfo).
+     */
+    public record CallbackRequest(
+        @JsonProperty("transactionKey") String transactionKey,
+        @JsonProperty("orderId") String orderId,
+        @JsonProperty("cardType") CardType cardType,
+        @JsonProperty("cardNo") String cardNo,
+        @JsonProperty("amount") Long amount,
+        @JsonProperty("status") TransactionStatus status,
+        @JsonProperty("reason") String reason
+    ) {
+    }
+
+    /**
      * PG API 응답 래퍼.
      */
     public record ApiResponse<T>(

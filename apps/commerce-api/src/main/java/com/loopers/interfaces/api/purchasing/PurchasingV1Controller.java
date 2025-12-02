@@ -2,6 +2,7 @@ package com.loopers.interfaces.api.purchasing;
 
 import com.loopers.application.purchasing.OrderInfo;
 import com.loopers.application.purchasing.PurchasingFacade;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.interfaces.api.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -74,6 +75,38 @@ public class PurchasingV1Controller {
     ) {
         OrderInfo orderInfo = purchasingFacade.getOrder(userId, orderId);
         return ApiResponse.success(PurchasingV1Dto.OrderResponse.from(orderInfo));
+    }
+
+    /**
+     * PG 결제 콜백을 처리합니다.
+     *
+     * @param orderId 주문 ID
+     * @param callbackRequest 콜백 요청 정보
+     * @return 성공 응답
+     */
+    @PostMapping("/{orderId}/callback")
+    public ApiResponse<Void> handlePaymentCallback(
+        @PathVariable Long orderId,
+        @RequestBody PaymentGatewayDto.CallbackRequest callbackRequest
+    ) {
+        purchasingFacade.handlePaymentCallback(orderId, callbackRequest);
+        return ApiResponse.success();
+    }
+
+    /**
+     * 결제 상태 확인 API를 통해 주문 상태를 복구합니다.
+     *
+     * @param userId X-USER-ID 헤더
+     * @param orderId 주문 ID
+     * @return 성공 응답
+     */
+    @PostMapping("/{orderId}/recover")
+    public ApiResponse<Void> recoverOrderStatus(
+        @RequestHeader("X-USER-ID") String userId,
+        @PathVariable Long orderId
+    ) {
+        purchasingFacade.recoverOrderStatusByPaymentCheck(userId, orderId);
+        return ApiResponse.success();
     }
 }
 

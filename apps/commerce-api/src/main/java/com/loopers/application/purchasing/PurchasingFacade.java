@@ -14,6 +14,7 @@ import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
+import com.loopers.infrastructure.user.UserJpaRepository;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.support.error.CoreException;
@@ -45,6 +46,7 @@ import java.util.stream.Collectors;
 public class PurchasingFacade {
 
     private final UserRepository userRepository;
+    private final UserJpaRepository userJpaRepository;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
     private final CouponRepository couponRepository;
@@ -172,7 +174,13 @@ public class PurchasingFacade {
         Order savedOrder = orderRepository.save(order);
 
         // PG 결제 요청 (비동기)
-        requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
+        // 성공 시 transactionKey를 저장하여 나중에 상태 확인 가능하도록 함
+        String transactionKey = requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
+        if (transactionKey != null) {
+            // TODO: 주문에 transactionKey를 저장하는 필드가 있다면 저장
+            // 현재는 주문 ID로 PG에서 결제 정보를 조회할 수 있으므로 일단 로그만 기록
+            log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", savedOrder.getId(), transactionKey);
+        }
 
         return OrderInfo.from(savedOrder);
     }
@@ -435,8 +443,9 @@ public class PurchasingFacade {
      * @param cardType 카드 타입
      * @param cardNo 카드 번호
      * @param amount 결제 금액
+     * @return transactionKey (성공 시), null (실패 시)
      */
-    private void requestPaymentToGateway(String userId, Long orderId, String cardType, String cardNo, Integer amount) {
+    private String requestPaymentToGateway(String userId, Long orderId, String cardType, String cardNo, Integer amount) {
         try {
             // 카드 타입 변환
             PaymentGatewayDto.CardType gatewayCardType;
@@ -465,8 +474,10 @@ public class PurchasingFacade {
             if (response != null && response.meta() != null
                 && response.meta().result() == PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
                 && response.data() != null) {
+                String transactionKey = response.data().transactionKey();
                 log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
-                    orderId, response.data().transactionKey());
+                    orderId, transactionKey);
+                return transactionKey;
             } else {
                 // PG 결제 요청 실패 응답 처리
                 String errorCode = response != null && response.meta() != null
@@ -478,6 +489,7 @@ public class PurchasingFacade {
                 
                 // 결제 실패 시 주문 취소 및 리소스 원복
                 handlePaymentFailure(userId, orderId, errorCode, message);
+                return null;
             }
         } catch (FeignException.TimeoutException e) {
             // 타임아웃 예외 처리
@@ -489,6 +501,7 @@ public class PurchasingFacade {
             
             // 타임아웃 시 주문 취소 및 리소스 원복
             handlePaymentFailure(userId, orderId, "TIMEOUT", "PG 결제 요청 타임아웃");
+            return null;
         } catch (FeignException e) {
             // Feign 예외 처리 (연결 실패, 서버 오류 등)
             Request request = e.request();
@@ -518,6 +531,7 @@ public class PurchasingFacade {
                 handlePaymentFailure(userId, orderId, "FEIGN_ERROR",
                     String.format("PG Feign 예외 (status: %d)", status));
             }
+            return null;
         } catch (Exception e) {
             // 기타 예외 처리
             // SocketTimeoutException 등도 여기서 처리됨
@@ -531,6 +545,169 @@ public class PurchasingFacade {
                 handlePaymentFailure(userId, orderId, "UNEXPECTED_ERROR", 
                     e.getMessage() != null ? e.getMessage() : "예상치 못한 오류");
             }
+            return null;
+        }
+    }
+
+    /**
+     * PG 결제 콜백을 처리합니다.
+     * <p>
+     * PG 시스템에서 결제 처리 완료 후 콜백으로 전송된 결제 결과를 받아
+     * 주문 상태를 업데이트합니다.
+     * </p>
+     * <p>
+     * <b>처리 내용:</b>
+     * <ul>
+     *   <li>결제 성공 (SUCCESS): 주문 상태를 COMPLETED로 변경</li>
+     *   <li>결제 실패 (FAILED): 주문 상태를 CANCELED로 변경하고 리소스 원복</li>
+     *   <li>결제 대기 (PENDING): 상태 유지 (추가 처리 없음)</li>
+     * </ul>
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param callbackRequest 콜백 요청 정보
+     */
+    @Transactional
+    public void handlePaymentCallback(Long orderId, PaymentGatewayDto.CallbackRequest callbackRequest) {
+        try {
+            // 주문 조회
+            Order order = orderRepository.findById(orderId)
+                .orElse(null);
+            
+            if (order == null) {
+                log.warn("콜백 처리 시 주문을 찾을 수 없습니다. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+                return;
+            }
+            
+            // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
+            if (order.getStatus() == OrderStatus.COMPLETED) {
+                log.info("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+                return;
+            }
+            
+            if (order.getStatus() == OrderStatus.CANCELED) {
+                log.info("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+                return;
+            }
+            
+            // 결제 상태에 따른 처리
+            PaymentGatewayDto.TransactionStatus status = callbackRequest.status();
+            if (status == PaymentGatewayDto.TransactionStatus.SUCCESS) {
+                // 결제 성공: 주문 완료
+                order.complete();
+                orderRepository.save(order);
+                log.info("PG 결제 성공 콜백 처리 완료. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+            } else if (status == PaymentGatewayDto.TransactionStatus.FAILED) {
+                // 결제 실패: 주문 취소 및 리소스 원복
+                User user = loadUser(order.getUserId());
+                cancelOrder(order, user);
+                log.info("PG 결제 실패 콜백 처리 완료. (orderId: {}, transactionKey: {}, reason: {})",
+                    orderId, callbackRequest.transactionKey(), callbackRequest.reason());
+            } else {
+                // PENDING 상태: 아직 처리 중이므로 상태 유지
+                log.info("PG 결제 대기 중 콜백 수신. (orderId: {}, transactionKey: {})",
+                    orderId, callbackRequest.transactionKey());
+            }
+        } catch (Exception e) {
+            log.error("콜백 처리 중 오류 발생. (orderId: {}, transactionKey: {})",
+                orderId, callbackRequest.transactionKey(), e);
+            throw e; // 콜백 실패는 재시도 가능하도록 예외를 다시 던짐
+        }
+    }
+
+    /**
+     * 결제 상태 확인 API를 통해 주문 상태를 복구합니다.
+     * <p>
+     * 콜백이 오지 않았거나 타임아웃된 경우, PG 시스템의 결제 상태 확인 API를 호출하여
+     * 실제 결제 상태를 확인하고 주문 상태를 업데이트합니다.
+     * </p>
+     * <p>
+     * <b>처리 내용:</b>
+     * <ul>
+     *   <li>주문 ID로 PG에서 결제 정보 조회</li>
+     *   <li>결제 상태에 따라 주문 상태 업데이트</li>
+     *   <li>결제 성공 시 주문 완료, 실패 시 주문 취소 및 리소스 원복</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     */
+    @Transactional
+    public void recoverOrderStatusByPaymentCheck(String userId, Long orderId) {
+        try {
+            // 주문 조회
+            Order order = orderRepository.findById(orderId)
+                .orElse(null);
+            
+            if (order == null) {
+                log.warn("상태 복구 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
+            if (order.getStatus() == OrderStatus.COMPLETED) {
+                log.info("이미 완료된 주문입니다. 상태 복구를 건너뜁니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            if (order.getStatus() == OrderStatus.CANCELED) {
+                log.info("이미 취소된 주문입니다. 상태 복구를 건너뜁니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // PG에서 주문별 결제 정보 조회
+            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
+                paymentGatewayClient.getTransactionsByOrder(userId, String.valueOf(orderId));
+            
+            if (response == null || response.meta() == null
+                || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+                || response.data() == null || response.data().transactions() == null
+                || response.data().transactions().isEmpty()) {
+                log.warn("PG에서 결제 정보를 찾을 수 없습니다. (orderId: {})", orderId);
+                return;
+            }
+            
+            // 가장 최근 트랜잭션의 상태 확인
+            PaymentGatewayDto.TransactionResponse latestTransaction = 
+                response.data().transactions().get(response.data().transactions().size() - 1);
+            
+            PaymentGatewayDto.TransactionStatus status = latestTransaction.status();
+            
+            if (status == PaymentGatewayDto.TransactionStatus.SUCCESS) {
+                // 결제 성공: 주문 완료
+                order.complete();
+                orderRepository.save(order);
+                log.info("결제 상태 확인 결과, 주문 상태를 COMPLETED로 복구했습니다. (orderId: {}, transactionKey: {})",
+                    orderId, latestTransaction.transactionKey());
+            } else if (status == PaymentGatewayDto.TransactionStatus.FAILED) {
+                // 결제 실패: 주문 취소 및 리소스 원복
+                // Order의 userId는 Long이므로 UserJpaRepository를 사용하여 조회
+                User user = userJpaRepository.findById(order.getUserId())
+                    .orElse(null);
+                if (user == null) {
+                    log.warn("상태 복구 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
+                        orderId, order.getUserId());
+                    return;
+                }
+                cancelOrder(order, user);
+                log.info("결제 상태 확인 결과, 주문 상태를 CANCELED로 복구했습니다. (orderId: {}, transactionKey: {}, reason: {})",
+                    orderId, latestTransaction.transactionKey(), latestTransaction.reason());
+            } else {
+                // PENDING 상태: 아직 처리 중
+                log.info("결제 상태 확인 결과, 아직 처리 중입니다. (orderId: {}, transactionKey: {})",
+                    orderId, latestTransaction.transactionKey());
+            }
+        } catch (FeignException e) {
+            log.error("결제 상태 확인 API 호출 중 오류 발생. (orderId: {})", orderId, e);
+            // API 호출 실패는 로그만 기록하고 예외를 던지지 않음 (수동 복구 가능하도록)
+        } catch (Exception e) {
+            log.error("상태 복구 중 오류 발생. (orderId: {})", orderId, e);
+            // 기타 오류도 로그만 기록
         }
     }
 
