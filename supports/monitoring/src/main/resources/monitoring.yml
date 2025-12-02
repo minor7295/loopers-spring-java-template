@@ -3,6 +3,16 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+        payment.gateway.request.duration: true # PG 요청 latency 메트릭 (P50/P95/P99) (Building Resilient Distributed Systems: Observability)
+      percentiles:
+        payment.gateway.request.duration:
+          p50: 0.5
+          p95: 0.95
+          p99: 0.99
+      slo:
+        payment.gateway.request.duration:
+          - 2s  # 2초 이내 응답 목표
+          - 5s  # 5초 이내 응답 목표
     tags:
       application:
         ${spring.application.name}
@@ -26,6 +36,9 @@ management:
             - livenessState
         readiness:
           show-components: always
+          include:
+            - livenessState
+            - paymentGateway # PG 서비스 Health Indicator 포함 (Building Resilient Distributed Systems: Health Checks)
     prometheus:
       access: read_only
   health:
