@@ -41,7 +41,7 @@ spring:
       on-profile: local, test
 
 server:
-  port: 8082
+  port: 8095
 
 management:
   server:
@@ -54,7 +54,7 @@ spring:
       on-profile: dev
 
 server:
-  port: 8082
+  port: 8095
 
 management:
   server:

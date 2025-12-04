@@ -12,6 +12,9 @@ management:
         include:
           - health
           - prometheus
+          - metrics
+          - circuitbreakers
+          - circuitbreakerevents
   endpoint:
     health:
       probes:
@@ -25,6 +28,10 @@ management:
           show-components: always
     prometheus:
       access: read_only
+    circuitbreakers:
+      enabled: true
+    circuitbreakerevents:
+      enabled: true
   health:
     livenessState:
       enabled: true

@@ -30,7 +30,7 @@ spring:
       enabled: false # 스케줄러에서 수동 실행하므로 자동 실행 비활성화
 
 payment-gateway:
-  url: http://localhost:8082
+  url: http://localhost:8095
 
 feign:
   client:
@@ -137,6 +137,17 @@ spring:
   config:
     activate:
       on-profile: local, test
+
+server:
+  port: 8080
+
+management:
+  server:
+    port: 8087
+
+scheduler:
+  like-count-sync:
+    enabled: false # 좋아요 동기화 배치 비활성화
 
 ---
 spring:

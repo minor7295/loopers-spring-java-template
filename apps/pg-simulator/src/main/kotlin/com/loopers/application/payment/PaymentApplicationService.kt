@@ -20,8 +20,10 @@ class PaymentApplicationService(
     private val transactionKeyGenerator: TransactionKeyGenerator,
 ) {
     companion object {
-        private val RATE_LIMIT_EXCEEDED = (1..20)
-        private val RATE_INVALID_CARD = (21..30)
+//        private val RATE_LIMIT_EXCEEDED = (1..20)
+//        private val RATE_INVALID_CARD = (21..30)
+        private val RATE_LIMIT_EXCEEDED = (1..0)
+        private val RATE_INVALID_CARD = (1..0)
     }
 
     @Transactional
