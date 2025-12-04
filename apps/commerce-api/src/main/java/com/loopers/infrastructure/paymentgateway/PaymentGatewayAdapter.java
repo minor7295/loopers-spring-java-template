@@ -3,6 +3,7 @@ package com.loopers.infrastructure.paymentgateway;
 import com.loopers.application.purchasing.PaymentRequest;
 import com.loopers.domain.order.PaymentResult;
 import feign.FeignException;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,7 @@ public class PaymentGatewayAdapter {
      * @param request 결제 요청
      * @return 결제 결과 (성공 또는 실패)
      */
+    @CircuitBreaker(name = "pgCircuit", fallbackMethod = "fallback")
     public PaymentResult requestPayment(PaymentRequest request) {
         PaymentGatewayDto.PaymentRequest dtoRequest = toDto(request);
         PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
@@ -38,7 +40,42 @@ public class PaymentGatewayAdapter {
         
         return toDomainResult(response, request.orderId());
     }
-
+    
+    /**
+     * Circuit Breaker fallback 메서드.
+     *
+     * @param request 결제 요청
+     * @param t 발생한 예외
+     * @return 결제 대기 상태의 실패 결과
+     */
+    public PaymentResult fallback(PaymentRequest request, Throwable t) {
+        log.warn("Circuit Breaker fallback 호출됨. (orderId: {}, exception: {})", 
+            request.orderId(), t.getClass().getSimpleName(), t);
+        metrics.recordFallback("paymentGatewayClient");
+        return new PaymentResult.Failure(
+            "CIRCUIT_BREAKER_OPEN",
+            "결제 대기 상태",
+            false,
+            false,
+            false
+        );
+    }
+    
+    /**
+     * Circuit Breaker fallback 메서드 (결제 상태 조회).
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     * @param t 발생한 예외
+     * @return PENDING 상태 반환
+     */
+    public PaymentGatewayDto.TransactionStatus getPaymentStatusFallback(String userId, String orderId, Throwable t) {
+        log.warn("Circuit Breaker fallback 호출됨 (결제 상태 조회). (orderId: {}, exception: {})", 
+            orderId, t.getClass().getSimpleName(), t);
+        metrics.recordFallback("paymentGatewaySchedulerClient");
+        return PaymentGatewayDto.TransactionStatus.PENDING;
+    }
+    
     /**
      * 결제 상태를 조회합니다.
      *
@@ -46,6 +83,7 @@ public class PaymentGatewayAdapter {
      * @param orderId 주문 ID
      * @return 결제 상태 (SUCCESS, FAILED, PENDING)
      */
+    @CircuitBreaker(name = "pgCircuit", fallbackMethod = "getPaymentStatusFallback")
     public PaymentGatewayDto.TransactionStatus getPaymentStatus(String userId, String orderId) {
         PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
             paymentGatewaySchedulerClient.getTransactionsByOrder(userId, orderId);

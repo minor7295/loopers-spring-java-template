@@ -22,6 +22,7 @@ import java.util.Set;
  * <p>
  * <b>외부 시스템 장애 예시:</b>
  * <ul>
+ *   <li>CircuitBreaker Open (CIRCUIT_BREAKER_OPEN)</li>
  *   <li>서버 오류 (5xx)</li>
  *   <li>타임아웃</li>
  *   <li>네트워크 오류</li>
@@ -43,6 +44,8 @@ public class PaymentFailureClassifier {
         "PAYMENT_FAILED"
     );
     
+    private static final String CIRCUIT_BREAKER_OPEN = "CIRCUIT_BREAKER_OPEN";
+    
     /**
      * 오류 코드를 기반으로 결제 실패 유형을 분류합니다.
      *
@@ -53,7 +56,12 @@ public class PaymentFailureClassifier {
         if (errorCode == null) {
             return PaymentFailureType.EXTERNAL_SYSTEM_FAILURE;
         }
-
+        
+        // CircuitBreaker Open 상태는 명시적으로 외부 시스템 장애로 간주
+        if (CIRCUIT_BREAKER_OPEN.equals(errorCode)) {
+            return PaymentFailureType.EXTERNAL_SYSTEM_FAILURE;
+        }
+        
         // 명확한 비즈니스 실패 오류 코드만 취소 처리
         boolean isBusinessFailure = BUSINESS_FAILURE_CODES.stream()
             .anyMatch(errorCode::contains);

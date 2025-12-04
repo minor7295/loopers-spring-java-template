@@ -18,7 +18,7 @@ public enum PaymentFailureType {
     
     /**
      * 외부 시스템 장애: 주문 PENDING 상태 유지
-     * 예: 서버 오류, 타임아웃 등
+     * 예: CircuitBreaker Open, 서버 오류, 타임아웃 등
      */
     EXTERNAL_SYSTEM_FAILURE
 }
