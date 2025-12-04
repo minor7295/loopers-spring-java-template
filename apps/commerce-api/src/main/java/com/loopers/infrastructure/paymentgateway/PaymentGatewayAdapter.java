@@ -78,6 +78,11 @@ public class PaymentGatewayAdapter {
             PaymentGatewayDto.TransactionResponse latestTransaction =
                 response.data().transactions().get(response.data().transactions().size() - 1);
             return latestTransaction.status();
+        } catch (FeignException.NotFound e) {
+            // 404 Not Found: 결제 요청이 PG 서버에 전달되지 않았거나 실패한 경우
+            // PG 서버 오류로 결제 처리되지 않은 경우이므로 FAILED로 처리하여 주문을 CANCELED로 변경
+            log.warn("PG 결제 상태 조회 실패 (404 Not Found). 결제 요청이 PG 서버에 전달되지 않았거나 실패한 것으로 간주합니다. (orderId: {})", orderId);
+            return PaymentGatewayDto.TransactionStatus.FAILED;
         } catch (Exception e) {
             log.warn("PG 결제 상태 조회 실패. (orderId: {})", orderId, e);
             return PaymentGatewayDto.TransactionStatus.PENDING;
