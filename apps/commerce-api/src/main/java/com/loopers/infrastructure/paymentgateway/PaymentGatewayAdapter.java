@@ -62,47 +62,43 @@ public class PaymentGatewayAdapter {
     }
     
     /**
+     * Circuit Breaker fallback 메서드 (결제 상태 조회).
+     *
+     * @param userId 사용자 ID
+     * @param orderId 주문 ID
+     * @param t 발생한 예외
+     * @return PENDING 상태 반환
+     */
+    public PaymentGatewayDto.TransactionStatus getPaymentStatusFallback(String userId, String orderId, Throwable t) {
+        log.warn("Circuit Breaker fallback 호출됨 (결제 상태 조회). (orderId: {}, exception: {})", 
+            orderId, t.getClass().getSimpleName(), t);
+        metrics.recordFallback("paymentGatewaySchedulerClient");
+        return PaymentGatewayDto.TransactionStatus.PENDING;
+    }
+    
+    /**
      * 결제 상태를 조회합니다.
      *
      * @param userId 사용자 ID
      * @param orderId 주문 ID
      * @return 결제 상태 (SUCCESS, FAILED, PENDING)
      */
+    @CircuitBreaker(name = "pgCircuit", fallbackMethod = "getPaymentStatusFallback")
     public PaymentGatewayDto.TransactionStatus getPaymentStatus(String userId, String orderId) {
-        try {
-            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
-                paymentGatewaySchedulerClient.getTransactionsByOrder(userId, orderId);
-            
-            if (response == null || response.meta() == null
-                || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
-                || response.data() == null || response.data().transactions() == null
-                || response.data().transactions().isEmpty()) {
-                return PaymentGatewayDto.TransactionStatus.PENDING;
-            }
-            
-            // 가장 최근 트랜잭션의 상태 반환
-            PaymentGatewayDto.TransactionResponse latestTransaction =
-                response.data().transactions().get(response.data().transactions().size() - 1);
-            return latestTransaction.status();
-        } catch (FeignException.NotFound e) {
-            // 404 Not Found: 결제 요청이 PG 서버에 전달되지 않았거나 실패한 경우
-            // PG 서버 오류로 결제 처리되지 않은 경우이므로 FAILED로 처리하여 주문을 CANCELED로 변경
-            log.warn("PG 결제 상태 조회 실패 (404 Not Found). 결제 요청이 PG 서버에 전달되지 않았거나 실패한 것으로 간주합니다. (orderId: {})", orderId);
-            metrics.recordClientError("paymentGatewaySchedulerClient", 404);
-            return PaymentGatewayDto.TransactionStatus.FAILED;
-        } catch (FeignException e) {
-            int status = e.status();
-            if (status >= 500) {
-                metrics.recordServerError("paymentGatewaySchedulerClient", status);
-            } else if (status >= 400) {
-                metrics.recordClientError("paymentGatewaySchedulerClient", status);
-            }
-            log.warn("PG 결제 상태 조회 실패. (orderId: {}, status: {})", orderId, status, e);
-            return PaymentGatewayDto.TransactionStatus.PENDING;
-        } catch (Exception e) {
-            log.warn("PG 결제 상태 조회 실패. (orderId: {})", orderId, e);
+        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
+            paymentGatewaySchedulerClient.getTransactionsByOrder(userId, orderId);
+        
+        if (response == null || response.meta() == null
+            || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
+            || response.data() == null || response.data().transactions() == null
+            || response.data().transactions().isEmpty()) {
             return PaymentGatewayDto.TransactionStatus.PENDING;
         }
+        
+        // 가장 최근 트랜잭션의 상태 반환
+        PaymentGatewayDto.TransactionResponse latestTransaction =
+            response.data().transactions().get(response.data().transactions().size() - 1);
+        return latestTransaction.status();
     }
     
     private PaymentGatewayDto.PaymentRequest toDto(PaymentRequest request) {
