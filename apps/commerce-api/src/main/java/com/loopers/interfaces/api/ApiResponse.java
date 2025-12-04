@@ -19,6 +19,10 @@ public record ApiResponse<T>(Metadata meta, T data) {
         return new ApiResponse<>(Metadata.success(), null);
     }
 
+    public static ApiResponse<Void> successVoid() {
+        return new ApiResponse<>(Metadata.success(), null);
+    }
+
     public static <T> ApiResponse<T> success(T data) {
         return new ApiResponse<>(Metadata.success(), data);
     }

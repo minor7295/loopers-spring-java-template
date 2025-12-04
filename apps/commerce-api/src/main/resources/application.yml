@@ -29,6 +29,23 @@ spring:
     job:
       enabled: false # 스케줄러에서 수동 실행하므로 자동 실행 비활성화
 
+payment-gateway:
+  url: http://localhost:8082
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+      paymentGatewayClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
+      paymentGatewaySchedulerClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
 springdoc:
   use-fqn: true
   swagger-ui:

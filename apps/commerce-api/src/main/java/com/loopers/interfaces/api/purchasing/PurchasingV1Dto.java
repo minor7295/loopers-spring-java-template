@@ -21,13 +21,25 @@ public final class PurchasingV1Dto {
      */
     public record CreateRequest(
         @NotEmpty(message = "주문 상품은 1개 이상이어야 합니다.")
-        List<@Valid ItemRequest> items
+        List<@Valid ItemRequest> items,
+        @Valid PaymentRequest payment
     ) {
         public List<OrderItemCommand> toCommands() {
             return items.stream()
                 .map(item -> OrderItemCommand.of(item.productId(), item.quantity()))
                 .toList();
         }
+    }
+
+    /**
+     * 결제 정보 요청 DTO.
+     */
+    public record PaymentRequest(
+        @NotNull(message = "카드 타입은 필수입니다.")
+        String cardType,
+        @NotNull(message = "카드 번호는 필수입니다.")
+        String cardNo
+    ) {
     }
 
     /**
