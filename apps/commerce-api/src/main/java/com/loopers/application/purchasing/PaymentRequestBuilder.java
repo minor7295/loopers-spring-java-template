@@ -35,9 +35,11 @@ public class PaymentRequestBuilder {
      * @throws CoreException 잘못된 카드 타입인 경우
      */
     public PaymentRequest build(String userId, Long orderId, String cardType, String cardNo, Integer amount) {
+        // 주문 ID를 6자리 이상 문자열로 변환 (pg-simulator 검증 요구사항)
+        String orderIdString = formatOrderId(orderId);
         return new PaymentRequest(
             userId,
-            String.valueOf(orderId),
+            orderIdString,
             parseCardType(cardType),
             cardNo,
             amount.longValue(),
@@ -69,6 +71,19 @@ public class PaymentRequestBuilder {
      */
     private String generateCallbackUrl(Long orderId) {
         return String.format("http://localhost:%d/api/v1/orders/%d/callback", serverPort, orderId);
+    }
+    
+    /**
+     * 주문 ID를 6자리 이상 문자열로 변환합니다.
+     * <p>
+     * pg-simulator의 검증 요구사항에 맞추기 위해 최소 6자리로 패딩합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID (Long)
+     * @return 6자리 이상의 주문 ID 문자열
+     */
+    public String formatOrderId(Long orderId) {
+        return String.format("%06d", orderId);
     }
 }
 

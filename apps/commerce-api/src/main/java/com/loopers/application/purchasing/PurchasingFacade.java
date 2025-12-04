@@ -575,8 +575,10 @@ public class PurchasingFacade {
             String userIdString = user.getUserId();
             
             // PG에서 주문별 결제 정보 조회 (스케줄러 전용 클라이언트 사용 - Retry 적용)
+            // 주문 ID를 6자리 이상 문자열로 변환 (pg-simulator 검증 요구사항)
+            String orderIdString = paymentRequestBuilder.formatOrderId(orderId);
             PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
-                paymentGatewaySchedulerClient.getTransactionsByOrder(userIdString, String.valueOf(orderId));
+                paymentGatewaySchedulerClient.getTransactionsByOrder(userIdString, orderIdString);
             
             if (response == null || response.meta() == null
                 || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
@@ -638,8 +640,10 @@ public class PurchasingFacade {
     public void recoverOrderStatusByPaymentCheck(String userId, Long orderId) {
         try {
             // PG에서 결제 상태 조회
+            // 주문 ID를 6자리 이상 문자열로 변환 (pg-simulator 검증 요구사항)
+            String orderIdString = paymentRequestBuilder.formatOrderId(orderId);
             PaymentGatewayDto.TransactionStatus status = 
-                paymentGatewayAdapter.getPaymentStatus(userId, String.valueOf(orderId));
+                paymentGatewayAdapter.getPaymentStatus(userId, orderIdString);
             
             // OrderStatusUpdater를 사용하여 상태 업데이트
             orderStatusUpdater.updateByPaymentStatus(orderId, status, null, null);
