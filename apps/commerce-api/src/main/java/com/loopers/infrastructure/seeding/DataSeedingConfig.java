@@ -23,7 +23,7 @@ public class DataSeedingConfig {
     /**
      * 생성할 사용자 수
      */
-    private int userCount = 10000;
+    private int userCount = 100;
 
     /**
      * 생성할 브랜드 수
@@ -33,7 +33,7 @@ public class DataSeedingConfig {
     /**
      * 생성할 상품 수
      */
-    private int productCount = 100000;
+    private int productCount = 100;
 
     /**
      * 생성할 좋아요 수 (사용자당 평균 좋아요 수)
@@ -43,7 +43,7 @@ public class DataSeedingConfig {
     /**
      * 생성할 주문 수
      */
-    private int orderCount = 50000;
+    private int orderCount = 500;
 
     /**
      * 배치 크기 (한 번에 저장할 엔티티 수)
