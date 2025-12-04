@@ -1,0 +1,62 @@
+{
+  "title": "Circuit Breaker States (Highlight Current)",
+  "uid": null,
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Circuit Breaker State",
+      "id": 1,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "resilience4j_circuitbreaker_state{name=\"paymentGatewayClient\"}",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "options": {
+        "textMode": "name",          // 숫자 대신 시리즈 이름(state) 표시
+        "colorMode": "background",   // 배경색으로 강조
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "dark-gray"   // 기본: 회색 (값이 0인 state)
+              },
+              {
+                "value": 0.5,
+                "color": "green"       // 값이 1 이상인 state만 초록색으로 강조
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}
