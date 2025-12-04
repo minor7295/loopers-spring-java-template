@@ -29,6 +29,54 @@ spring:
     job:
       enabled: false # 스케줄러에서 수동 실행하므로 자동 실행 비활성화
 
+payment-gateway:
+  url: http://localhost:8082
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+      paymentGatewayClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
+      paymentGatewaySchedulerClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
+
+  retry:
+    configs:
+      default:
+        maxAttempts: 3 # 최대 재시도 횟수 (초기 시도 포함)
+        waitDuration: 500ms # 재시도 대기 시간 (기본값, paymentGatewayClient는 Java Config에서 Exponential Backoff 적용)
+        retryExceptions:
+          # 일시적 오류만 재시도: 5xx 서버 오류, 타임아웃, 네트워크 오류
+          - feign.FeignException$InternalServerError # 500 에러
+          - feign.FeignException$ServiceUnavailable   # 503 에러
+          - feign.FeignException$GatewayTimeout      # 504 에러
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          # 클라이언트 오류(4xx)는 재시도하지 않음: 비즈니스 로직 오류이므로 재시도해도 성공하지 않음
+          - feign.FeignException$BadRequest      # 400 에러
+          - feign.FeignException$Unauthorized    # 401 에러
+          - feign.FeignException$Forbidden       # 403 에러
+          - feign.FeignException$NotFound         # 404 에러
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 6s # 타임아웃 시간 (Feign readTimeout과 동일)
+        cancelRunningFuture: true # 실행 중인 Future 취소
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        timeoutDuration: 6s
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        timeoutDuration: 6s
 springdoc:
   use-fqn: true
   swagger-ui:
