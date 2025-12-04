@@ -44,4 +44,12 @@ public interface UserRepository {
      * @return 조회된 사용자, 없으면 null
      */
     User findByUserIdForUpdate(String userId);
+    
+    /**
+     * 사용자 ID (PK)로 사용자를 조회합니다.
+     *
+     * @param id 사용자 ID (PK)
+     * @return 조회된 사용자, 없으면 null
+     */
+    User findById(Long id);
 }

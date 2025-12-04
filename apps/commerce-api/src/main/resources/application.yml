@@ -29,6 +29,104 @@ spring:
     job:
       enabled: false # 스케줄러에서 수동 실행하므로 자동 실행 비활성화
 
+payment-gateway:
+  url: http://localhost:8082
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+      paymentGatewayClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
+      paymentGatewaySchedulerClient:
+        connectTimeout: 2000 # 연결 타임아웃 (2초)
+        readTimeout: 6000 # 읽기 타임아웃 (6초) - PG 처리 지연 1s~5s 고려
+        loggerLevel: full # 로깅 레벨 (디버깅용)
+  circuitbreaker:
+    enabled: false # FeignClient 자동 Circuit Breaker 비활성화 (어댑터 레벨에서 pgCircuit 사용)
+  resilience4j:
+    enabled: true # Resilience4j 활성화
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 20 # 슬라이딩 윈도우 크기 (Building Resilient Distributed Systems 권장: 20~50)
+        minimumNumberOfCalls: 1 # 최소 호출 횟수 (첫 호출부터 통계 수집하여 메트릭 즉시 노출)
+        permittedNumberOfCallsInHalfOpenState: 3 # Half-Open 상태에서 허용되는 호출 수
+        automaticTransitionFromOpenToHalfOpenEnabled: true # 자동으로 Half-Open으로 전환
+        waitDurationInOpenState: 10s # Open 상태 유지 시간 (10초 후 Half-Open으로 전환)
+        failureRateThreshold: 50 # 실패율 임계값 (50% 이상 실패 시 Open)
+        slowCallRateThreshold: 50 # 느린 호출 비율 임계값 (50% 이상 느리면 Open) - Release It! 권장: 50~70%
+        slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_SCHEDULER_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
+        recordExceptions:
+          - feign.FeignException
+          - feign.FeignException$InternalServerError
+          - feign.FeignException$ServiceUnavailable
+          - feign.FeignException$GatewayTimeout
+          - feign.FeignException$BadGateway
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions: [] # 모든 예외를 기록 (무시할 예외 없음)
+    instances:
+      pgCircuit:
+        baseConfig: default
+        slidingWindowSize: 20 # Building Resilient Distributed Systems 권장: 20 (과제 권장값)
+        minimumNumberOfCalls: 1 # 첫 호출부터 통계 수집하여 메트릭 즉시 노출
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50 # 느린 호출 비율 임계값 (50% 이상 느리면 Open) - Release It! 권장: 50~70%
+        slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_PAYMENT_GATEWAY_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
+  retry:
+    configs:
+      default:
+        maxAttempts: 3 # 최대 재시도 횟수 (초기 시도 포함)
+        waitDuration: 500ms # 재시도 대기 시간 (기본값, paymentGatewayClient는 Java Config에서 Exponential Backoff 적용)
+        retryExceptions:
+          # 일시적 오류만 재시도: 5xx 서버 오류, 타임아웃, 네트워크 오류
+          - feign.FeignException$InternalServerError # 500 에러
+          - feign.FeignException$ServiceUnavailable   # 503 에러
+          - feign.FeignException$GatewayTimeout      # 504 에러
+          - java.net.SocketTimeoutException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          # 클라이언트 오류(4xx)는 재시도하지 않음: 비즈니스 로직 오류이므로 재시도해도 성공하지 않음
+          - feign.FeignException$BadRequest      # 400 에러
+          - feign.FeignException$Unauthorized    # 401 에러
+          - feign.FeignException$Forbidden       # 403 에러
+          - feign.FeignException$NotFound         # 404 에러
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 6s # 타임아웃 시간 (Feign readTimeout과 동일)
+        cancelRunningFuture: true # 실행 중인 Future 취소
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        timeoutDuration: 6s
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        timeoutDuration: 6s
+  bulkhead:
+    configs:
+      default:
+        maxConcurrentCalls: 20 # 동시 호출 최대 수 (Building Resilient Distributed Systems: 격벽 패턴)
+        maxWaitDuration: 5s # 대기 시간 (5초 초과 시 BulkheadFullException 발생)
+    instances:
+      paymentGatewayClient:
+        baseConfig: default
+        maxConcurrentCalls: 20 # PG 호출용 전용 격벽: 동시 호출 최대 20개로 제한
+        maxWaitDuration: 5s
+      paymentGatewaySchedulerClient:
+        baseConfig: default
+        maxConcurrentCalls: 10 # 스케줄러용 격벽: 동시 호출 최대 10개로 제한 (배치 작업이므로 더 보수적)
+        maxWaitDuration: 5s
+
 springdoc:
   use-fqn: true
   swagger-ui:
