@@ -43,11 +43,13 @@ public sealed interface PaymentResult {
         Function<Success, T> successHandler,
         Function<Failure, T> failureHandler
     ) {
-        successHandler.apply(success);
-//        return switch (this) {
-//            case Success success -> successHandler.apply(success);
-//            case Failure failure -> failureHandler.apply(failure);
-//        };
+        if (this instanceof Success success) {
+            return successHandler.apply(success);
+        } else if (this instanceof Failure failure) {
+            return failureHandler.apply(failure);
+        } else {
+            throw new IllegalStateException("Unknown PaymentResult type: " + this.getClass());
+        }
     }
 }
 
