@@ -48,6 +48,8 @@ feign:
         loggerLevel: full # 로깅 레벨 (디버깅용)
   circuitbreaker:
     enabled: true # CircuitBreaker 활성화
+    group:
+      enabled: true # Circuit Breaker 그룹 활성화
   resilience4j:
     enabled: true # Resilience4j 활성화
 
@@ -57,7 +59,7 @@ resilience4j:
       default:
         registerHealthIndicator: true
         slidingWindowSize: 20 # 슬라이딩 윈도우 크기 (Building Resilient Distributed Systems 권장: 20~50)
-        minimumNumberOfCalls: 5 # 최소 호출 횟수 (이 횟수 이상 호출되어야 통계 수집)
+        minimumNumberOfCalls: 1 # 최소 호출 횟수 (첫 호출부터 통계 수집하여 메트릭 즉시 노출)
         permittedNumberOfCallsInHalfOpenState: 3 # Half-Open 상태에서 허용되는 호출 수
         automaticTransitionFromOpenToHalfOpenEnabled: true # 자동으로 Half-Open으로 전환
         waitDurationInOpenState: 10s # Open 상태 유지 시간 (10초 후 Half-Open으로 전환)
@@ -66,32 +68,45 @@ resilience4j:
         slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_SCHEDULER_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
         recordExceptions:
           - feign.FeignException
+          - feign.FeignException$InternalServerError
+          - feign.FeignException$ServiceUnavailable
+          - feign.FeignException$GatewayTimeout
+          - feign.FeignException$BadGateway
           - java.net.SocketTimeoutException
           - java.util.concurrent.TimeoutException
+        ignoreExceptions: [] # 모든 예외를 기록 (무시할 예외 없음)
     instances:
       paymentGatewayClient:
         baseConfig: default
         slidingWindowSize: 20 # Building Resilient Distributed Systems 권장: 20 (과제 권장값)
-        minimumNumberOfCalls: 5
+        minimumNumberOfCalls: 1 # 첫 호출부터 통계 수집하여 메트릭 즉시 노출
         waitDurationInOpenState: 10s
         failureRateThreshold: 50
         slowCallRateThreshold: 50 # 느린 호출 비율 임계값 (50% 이상 느리면 Open) - Release It! 권장: 50~70%
         slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_PAYMENT_GATEWAY_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
-        # 실패율 임계값 50%: 최소 5번 호출 중 3번 이상 실패 시 Open 상태로 전환
+        # 실패율 임계값 50%: 호출 중 50% 이상 실패 시 Open 상태로 전환
         # 이 설정은 Retry와 함께 사용될 때 적절한 균형을 제공합니다:
         # - 너무 낮으면 (예: 30%): 정상적인 일시적 오류에도 Fallback이 과도하게 호출됨
         # - 너무 높으면 (예: 70%): 실제 장애 상황에서 Fallback이 늦게 활성화됨
         # 50%는 일반적인 마이크로서비스 환경에서 권장되는 값입니다
-        # 느린 호출 비율 50%: 최소 5번 호출 중 3번 이상이 3초 이상 걸리면 Open 상태로 전환
+        # 느린 호출 비율 50%: 호출 중 50% 이상이 느리면 Open 상태로 전환
         # Release It! 권장: "실패가 아니더라도 너무 느린 응답"도 장애의 징후이므로 감시
       paymentGatewaySchedulerClient:
         baseConfig: default
         slidingWindowSize: 20 # Building Resilient Distributed Systems 권장: 20 (과제 권장값)
-        minimumNumberOfCalls: 5
+        minimumNumberOfCalls: 1 # 첫 호출부터 통계 수집하여 메트릭 즉시 노출
         waitDurationInOpenState: 10s
         failureRateThreshold: 50
         slowCallRateThreshold: 50 # 느린 호출 비율 임계값 (50% 이상 느리면 Open) - Release It! 권장: 50~70%
         slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_SCHEDULER_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
+      pgCircuit:
+        baseConfig: default
+        slidingWindowSize: 20 # Building Resilient Distributed Systems 권장: 20 (과제 권장값)
+        minimumNumberOfCalls: 1 # 첫 호출부터 통계 수집하여 메트릭 즉시 노출
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50 # 느린 호출 비율 임계값 (50% 이상 느리면 Open) - Release It! 권장: 50~70%
+        slowCallDurationThreshold: ${RESILIENCE4J_CIRCUITBREAKER_PAYMENT_GATEWAY_SLOW_CALL_DURATION_THRESHOLD:2s} # 느린 호출 기준 시간 (2초 이상) - Building Resilient Distributed Systems 권장: 2s (환경 변수로 동적 설정 가능)
   retry:
     configs:
       default:

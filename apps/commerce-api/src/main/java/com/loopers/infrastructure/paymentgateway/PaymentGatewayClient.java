@@ -37,8 +37,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 @FeignClient(
     name = "paymentGatewayClient",
     url = "${payment-gateway.url}",
-    path = "/api/v1/payments",
-    fallback = PaymentGatewayClientFallback.class
+    path = "/api/v1/payments"
 )
 public interface PaymentGatewayClient {
 

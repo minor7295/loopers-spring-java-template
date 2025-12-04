@@ -3,13 +3,10 @@ package com.loopers.infrastructure.paymentgateway;
 import com.loopers.application.purchasing.PaymentRequest;
 import com.loopers.domain.order.PaymentResult;
 import feign.FeignException;
-import feign.Request;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-
-import java.net.SocketTimeoutException;
-import java.util.concurrent.TimeoutException;
 
 /**
  * 결제 게이트웨이 어댑터.
@@ -27,6 +24,7 @@ public class PaymentGatewayAdapter {
     
     private final PaymentGatewayClient paymentGatewayClient;
     private final PaymentGatewaySchedulerClient paymentGatewaySchedulerClient;
+    private final PaymentGatewayMetrics metrics;
     
     /**
      * 결제 요청을 전송합니다.
@@ -34,25 +32,33 @@ public class PaymentGatewayAdapter {
      * @param request 결제 요청
      * @return 결제 결과 (성공 또는 실패)
      */
+    @CircuitBreaker(name = "pgCircuit", fallbackMethod = "fallback")
     public PaymentResult requestPayment(PaymentRequest request) {
-        try {
-            PaymentGatewayDto.PaymentRequest dtoRequest = toDto(request);
-            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
-                paymentGatewayClient.requestPayment(request.userId(), dtoRequest);
-            
-            return toDomainResult(response, request.orderId());
-        } catch (FeignException e) {
-            return handleFeignException(e, request.orderId());
-        } catch (Exception e) {
-            log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", request.orderId(), e);
-            return new PaymentResult.Failure(
-                "UNKNOWN_ERROR",
-                e.getMessage(),
-                false,
-                false,
-                false
-            );
-        }
+        PaymentGatewayDto.PaymentRequest dtoRequest = toDto(request);
+        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
+            paymentGatewayClient.requestPayment(request.userId(), dtoRequest);
+        
+        return toDomainResult(response, request.orderId());
+    }
+    
+    /**
+     * Circuit Breaker fallback 메서드.
+     *
+     * @param request 결제 요청
+     * @param t 발생한 예외
+     * @return 결제 대기 상태의 실패 결과
+     */
+    public PaymentResult fallback(PaymentRequest request, Throwable t) {
+        log.warn("Circuit Breaker fallback 호출됨. (orderId: {}, exception: {})", 
+            request.orderId(), t.getClass().getSimpleName(), t);
+        metrics.recordFallback("paymentGatewayClient");
+        return new PaymentResult.Failure(
+            "CIRCUIT_BREAKER_OPEN",
+            "결제 대기 상태",
+            false,
+            false,
+            false
+        );
     }
     
     /**
@@ -82,7 +88,17 @@ public class PaymentGatewayAdapter {
             // 404 Not Found: 결제 요청이 PG 서버에 전달되지 않았거나 실패한 경우
             // PG 서버 오류로 결제 처리되지 않은 경우이므로 FAILED로 처리하여 주문을 CANCELED로 변경
             log.warn("PG 결제 상태 조회 실패 (404 Not Found). 결제 요청이 PG 서버에 전달되지 않았거나 실패한 것으로 간주합니다. (orderId: {})", orderId);
+            metrics.recordClientError("paymentGatewaySchedulerClient", 404);
             return PaymentGatewayDto.TransactionStatus.FAILED;
+        } catch (FeignException e) {
+            int status = e.status();
+            if (status >= 500) {
+                metrics.recordServerError("paymentGatewaySchedulerClient", status);
+            } else if (status >= 400) {
+                metrics.recordClientError("paymentGatewaySchedulerClient", status);
+            }
+            log.warn("PG 결제 상태 조회 실패. (orderId: {}, status: {})", orderId, status, e);
+            return PaymentGatewayDto.TransactionStatus.PENDING;
         } catch (Exception e) {
             log.warn("PG 결제 상태 조회 실패. (orderId: {})", orderId, e);
             return PaymentGatewayDto.TransactionStatus.PENDING;
@@ -108,6 +124,7 @@ public class PaymentGatewayAdapter {
             && response.data() != null) {
             String transactionKey = response.data().transactionKey();
             log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})", orderId, transactionKey);
+            metrics.recordSuccess("paymentGatewayClient");
             return new PaymentResult.Success(transactionKey);
         } else {
             String errorCode = response != null && response.meta() != null
@@ -120,62 +137,5 @@ public class PaymentGatewayAdapter {
         }
     }
     
-    private PaymentResult handleFeignException(FeignException e, String orderId) {
-        Request request = e.request();
-        int status = e.status();
-        String method = request != null ? request.httpMethod().name() : "UNKNOWN";
-        String url = request != null ? request.url() : "UNKNOWN";
-        
-        boolean isTimeout = isTimeout(e);
-        boolean isServerError = status >= 500;
-        boolean isClientError = status >= 400 && status < 500;
-        
-        if (isTimeout) {
-            log.error("PG 결제 요청 타임아웃 발생. (orderId: {}, method: {}, url: {})",
-                orderId, method, url, e);
-            return new PaymentResult.Failure("TIMEOUT", e.getMessage(), true, false, false);
-        }
-        
-        if (isServerError) {
-            log.error("PG 서버 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
-                orderId, status, method, url, e);
-            return new PaymentResult.Failure(
-                String.valueOf(status),
-                e.getMessage(),
-                false,
-                true,
-                false
-            );
-        }
-        
-        if (isClientError) {
-            log.warn("PG 클라이언트 오류 발생. (orderId: {}, status: {}, method: {}, url: {})",
-                orderId, status, method, url, e);
-            return new PaymentResult.Failure(
-                String.valueOf(status),
-                e.getMessage(),
-                false,
-                false,
-                true
-            );
-        }
-        
-        log.error("PG 결제 요청 중 Feign 예외 발생. (orderId: {}, status: {})",
-            orderId, status, e);
-        return new PaymentResult.Failure(
-            String.valueOf(status),
-            e.getMessage(),
-            false,
-            false,
-            false
-        );
-    }
-    
-    private boolean isTimeout(FeignException e) {
-        Throwable cause = e.getCause();
-        return cause instanceof SocketTimeoutException ||
-            cause instanceof TimeoutException ||
-            (e.getMessage() != null && e.getMessage().contains("timeout"));
-    }
 }
 
