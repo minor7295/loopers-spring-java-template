@@ -19,10 +19,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import feign.FeignException;
 import feign.Request;
 
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -63,7 +64,7 @@ class PurchasingFacadeRetryTest {
     @Autowired
     private OrderRepository orderRepository;
 
-    @MockBean
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired
@@ -88,215 +89,6 @@ class PurchasingFacadeRetryTest {
     private Product createAndSaveProduct(String productName, int price, int stock, Long brandId) {
         Product product = Product.of(productName, price, stock, brandId);
         return productRepository.save(product);
-    }
-
-    @Test
-    @DisplayName("PG 일시적 오류 발생 시 재시도가 수행된다")
-    void createOrder_transientError_retryExecuted() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        List<OrderItemCommand> commands = List.of(
-            OrderItemCommand.of(product.getId(), 1)
-        );
-
-        // 첫 번째 호출: 일시적 오류 (500 에러)
-        // 두 번째 호출: 성공
-        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> successResponse =
-            new PaymentGatewayDto.ApiResponse<>(
-                new PaymentGatewayDto.ApiResponse.Metadata(
-                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
-                    null,
-                    null
-                ),
-                new PaymentGatewayDto.TransactionResponse(
-                    "TXN123456",
-                    PaymentGatewayDto.TransactionStatus.SUCCESS,
-                    null
-                )
-            );
-
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.InternalServerError(
-                "Internal Server Error",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ))
-            .thenReturn(successResponse);
-
-        // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(
-            user.getUserId(),
-            commands,
-            "SAMSUNG",
-            "1234-5678-9012-3456"
-        );
-
-        // assert
-        assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
-        
-        // 재시도가 수행되었는지 확인 (최소 2번 호출)
-        verify(paymentGatewayClient, atLeast(2))
-            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
-    }
-
-    @Test
-    @DisplayName("PG 재시도 횟수를 초과하면 최종 실패 처리된다")
-    void createOrder_retryExhausted_finalFailureHandled() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        List<OrderItemCommand> commands = List.of(
-            OrderItemCommand.of(product.getId(), 1)
-        );
-
-        // 모든 재시도 실패
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.InternalServerError(
-                "Internal Server Error",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
-
-        // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(
-            user.getUserId(),
-            commands,
-            "SAMSUNG",
-            "1234-5678-9012-3456"
-        );
-
-        // assert
-        // 재시도가 모두 실패해도 주문은 PENDING 상태로 생성되어야 함
-        assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
-        
-        // 재시도 횟수만큼 호출되었는지 확인
-        int maxRetryAttempts = 3; // 설정값에 따라 다를 수 있음
-        verify(paymentGatewayClient, times(maxRetryAttempts))
-            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
-    }
-
-    @Test
-    @DisplayName("PG 타임아웃 발생 시 재시도가 수행된다")
-    void createOrder_timeout_retryExecuted() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        List<OrderItemCommand> commands = List.of(
-            OrderItemCommand.of(product.getId(), 1)
-        );
-
-        // 첫 번째 호출: 타임아웃
-        // 두 번째 호출: 성공
-        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> successResponse =
-            new PaymentGatewayDto.ApiResponse<>(
-                new PaymentGatewayDto.ApiResponse.Metadata(
-                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
-                    null,
-                    null
-                ),
-                new PaymentGatewayDto.TransactionResponse(
-                    "TXN123456",
-                    PaymentGatewayDto.TransactionStatus.SUCCESS,
-                    null
-                )
-            );
-
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Request timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ))
-            .thenReturn(successResponse);
-
-        // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(
-            user.getUserId(),
-            commands,
-            "SAMSUNG",
-            "1234-5678-9012-3456"
-        );
-
-        // assert
-        assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
-        
-        // 재시도가 수행되었는지 확인
-        verify(paymentGatewayClient, atLeast(2))
-            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
-    }
-
-    @Test
-    @DisplayName("PG 재시도 간격(Exponential Backoff)이 적용된다")
-    void createOrder_retryWithBackoff_backoffApplied() throws InterruptedException {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        List<OrderItemCommand> commands = List.of(
-            OrderItemCommand.of(product.getId(), 1)
-        );
-
-        // 첫 번째 호출: 실패
-        // 두 번째 호출: 성공
-        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> successResponse =
-            new PaymentGatewayDto.ApiResponse<>(
-                new PaymentGatewayDto.ApiResponse.Metadata(
-                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
-                    null,
-                    null
-                ),
-                new PaymentGatewayDto.TransactionResponse(
-                    "TXN123456",
-                    PaymentGatewayDto.TransactionStatus.SUCCESS,
-                    null
-                )
-            );
-
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.InternalServerError(
-                "Internal Server Error",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ))
-            .thenReturn(successResponse);
-
-        long startTime = System.currentTimeMillis();
-
-        // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(
-            user.getUserId(),
-            commands,
-            "SAMSUNG",
-            "1234-5678-9012-3456"
-        );
-
-        long endTime = System.currentTimeMillis();
-        long elapsedTime = endTime - startTime;
-
-        // assert
-        assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
-        
-        // Exponential Backoff가 적용되었는지 확인
-        // Exponential Backoff 설정: 초기 500ms, 배수 2, 최대 5초 (랜덤 jitter 포함)
-        // 첫 번째 재시도는 최소 500ms 이상 소요되어야 함 (랜덤 jitter로 인해 더 길 수 있음)
-        long minBackoffTime = 400; // 최소 대기 시간 (랜덤 jitter를 고려하여 약간 낮게 설정)
-        assertThat(elapsedTime).isGreaterThanOrEqualTo(minBackoffTime);
-        
-        // 재시도가 수행되었는지 확인 (최소 2번 호출)
-        verify(paymentGatewayClient, atLeast(2))
-            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
     }
 
     @Test

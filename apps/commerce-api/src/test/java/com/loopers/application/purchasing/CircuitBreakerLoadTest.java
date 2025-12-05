@@ -3,6 +3,7 @@ package com.loopers.application.purchasing;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
 import com.loopers.domain.order.OrderRepository;
+import com.loopers.infrastructure.order.OrderJpaRepository;
 import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
@@ -16,13 +17,14 @@ import com.loopers.testutil.CircuitBreakerTestUtil;
 import com.loopers.utils.DatabaseCleanUp;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterEach;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import feign.FeignException;
 import feign.Request;
 import java.util.Collections;
@@ -55,11 +57,11 @@ import static org.mockito.Mockito.*;
  * </ol>
  * </p>
  */
-@Slf4j
 @SpringBootTest
 @ActiveProfiles("test")
 @DisplayName("Circuit Breaker 부하 테스트 (Grafana 모니터링용)")
 class CircuitBreakerLoadTest {
+    private static final Logger log = LoggerFactory.getLogger(CircuitBreakerLoadTest.class);
 
     @Autowired
     private PurchasingFacade purchasingFacade;
@@ -76,7 +78,10 @@ class CircuitBreakerLoadTest {
     @Autowired
     private OrderRepository orderRepository;
 
-    @MockBean
+    @Autowired
+    private OrderJpaRepository orderJpaRepository;
+
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired(required = false)
@@ -201,7 +206,7 @@ class CircuitBreakerLoadTest {
         }
 
         // 모든 주문이 PENDING 상태로 생성되었는지 확인
-        List<com.loopers.domain.order.Order> orders = orderRepository.findAll();
+        List<com.loopers.domain.order.Order> orders = orderJpaRepository.findAll();
         assertThat(orders).hasSize(totalCalls);
         orders.forEach(order -> {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);

@@ -193,8 +193,10 @@ public class PurchasingFacade {
         try {
             String transactionKey = requestPaymentToGateway(userId, savedOrder.getId(), cardType, cardNo, savedOrder.getTotalAmount());
             if (transactionKey != null) {
-                // TODO: 주문에 transactionKey를 저장하는 필드가 있다면 저장
-                // 현재는 주문 ID로 PG에서 결제 정보를 조회할 수 있으므로 일단 로그만 기록
+                // 결제 성공: 주문 상태를 COMPLETED로 변경
+                // 같은 트랜잭션 내에서 직접 업데이트 (REQUIRES_NEW는 주문이 커밋되기 전이라 조회 불가)
+                savedOrder.complete();
+                savedOrder = orderRepository.save(savedOrder);
                 log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", savedOrder.getId(), transactionKey);
             } else {
                 // PG 요청 실패: 외부 시스템 장애로 간주

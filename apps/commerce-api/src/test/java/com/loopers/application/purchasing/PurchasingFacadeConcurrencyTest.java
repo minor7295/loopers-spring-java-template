@@ -128,7 +128,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         OrderItemCommand.of(products.get(index).getId(), 1)
                     );
-                    purchasingFacade.createOrder(userId, commands);
+                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -176,7 +176,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         OrderItemCommand.of(productId, quantityPerOrder)
                     );
-                    purchasingFacade.createOrder(userId, commands);
+                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -228,7 +228,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         new OrderItemCommand(product.getId(), 1, couponCode)
                     );
-                    purchasingFacade.createOrder(userId, commands);
+                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -277,7 +277,7 @@ class PurchasingFacadeConcurrencyTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(productId, orderQuantity)
         );
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
         Long orderId = orderInfo.orderId();
         
         // 주문 취소 전 재고 확인 (100 - 5 = 95)
@@ -317,7 +317,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> otherCommands = List.of(
                         OrderItemCommand.of(productId, 3)
                     );
-                    purchasingFacade.createOrder(userId, otherCommands);
+                    purchasingFacade.createOrder(userId, otherCommands, "SAMSUNG", "1234-5678-9012-3456");
                     orderSuccess.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {

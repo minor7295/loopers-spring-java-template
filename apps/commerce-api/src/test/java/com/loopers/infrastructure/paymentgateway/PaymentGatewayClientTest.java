@@ -6,11 +6,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import feign.FeignException;
 import feign.Request;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,7 +34,7 @@ import static org.mockito.Mockito.*;
 @DisplayName("PaymentGatewayClient 타임아웃 및 실패 처리 테스트")
 class PaymentGatewayClientTest {
 
-    @MockBean
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired
@@ -59,18 +60,15 @@ class PaymentGatewayClientTest {
         );
 
         // Mock 서버에서 타임아웃 예외 발생
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Request timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        SocketTimeoutException timeoutException = new SocketTimeoutException("Request timeout");
+        doThrow(new RuntimeException(timeoutException))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
-            .isInstanceOf(FeignException.class)
-            .hasMessageContaining("timeout");
+            .isInstanceOf(RuntimeException.class)
+            .hasCauseInstanceOf(SocketTimeoutException.class)
+            .hasMessageContaining("Request timeout");
     }
 
     @Test
@@ -87,18 +85,15 @@ class PaymentGatewayClientTest {
         );
 
         // Mock 서버에서 연결 실패 예외 발생
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.ConnectTimeout(
-                "Connection timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        SocketTimeoutException timeoutException = new SocketTimeoutException("Connection timeout");
+        doThrow(new RuntimeException(timeoutException))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
-            .isInstanceOf(FeignException.class)
-            .hasMessageContaining("timeout");
+            .isInstanceOf(RuntimeException.class)
+            .hasCauseInstanceOf(SocketTimeoutException.class)
+            .hasMessageContaining("Connection timeout");
     }
 
     @Test
@@ -115,18 +110,15 @@ class PaymentGatewayClientTest {
         );
 
         // Mock 서버에서 읽기 타임아웃 예외 발생
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Read timed out",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        SocketTimeoutException timeoutException = new SocketTimeoutException("Read timed out");
+        doThrow(new RuntimeException(timeoutException))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
-            .isInstanceOf(FeignException.class)
-            .hasMessageContaining("timeout");
+            .isInstanceOf(RuntimeException.class)
+            .hasCauseInstanceOf(SocketTimeoutException.class)
+            .hasMessageContaining("Read timed out");
     }
 
     @Test
@@ -137,18 +129,15 @@ class PaymentGatewayClientTest {
         String transactionKey = "TXN123456";
 
         // Mock 서버에서 타임아웃 예외 발생
-        when(paymentGatewayClient.getTransaction(anyString(), anyString()))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Request timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        SocketTimeoutException timeoutException = new SocketTimeoutException("Request timeout");
+        doThrow(new RuntimeException(timeoutException))
+            .when(paymentGatewayClient).getTransaction(anyString(), anyString());
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.getTransaction(userId, transactionKey))
-            .isInstanceOf(FeignException.class)
-            .hasMessageContaining("timeout");
+            .isInstanceOf(RuntimeException.class)
+            .hasCauseInstanceOf(SocketTimeoutException.class)
+            .hasMessageContaining("Request timeout");
     }
 
     @Test

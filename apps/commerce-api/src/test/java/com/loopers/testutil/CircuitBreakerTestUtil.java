@@ -2,7 +2,8 @@ package com.loopers.testutil;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -14,10 +15,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Circuit Breaker를 특정 상태로 만들거나, 실패를 유발하여 Circuit Breaker를 열리게 하는 유틸리티 메서드를 제공합니다.
  * </p>
  */
-@Slf4j
 @Component
 public class CircuitBreakerTestUtil {
 
+    private static final Logger log = LoggerFactory.getLogger(CircuitBreakerTestUtil.class);
     private final CircuitBreakerRegistry circuitBreakerRegistry;
 
     @Autowired

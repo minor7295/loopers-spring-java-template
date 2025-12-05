@@ -1,5 +1,6 @@
-package com.loopers.interfaces.api.purchasing;
+package com.loopers.interfaces.api;
 
+import com.loopers.application.pointwallet.PointWalletFacade;
 import com.loopers.application.signup.SignUpFacade;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
@@ -11,20 +12,25 @@ import com.loopers.domain.user.UserTestFixture;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.interfaces.api.ApiResponse;
+import com.loopers.interfaces.api.purchasing.PurchasingV1Dto;
 import com.loopers.utils.DatabaseCleanUp;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import feign.FeignException;
 import feign.Request;
 
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 import org.springframework.core.ParameterizedTypeReference;
+import static org.mockito.Mockito.doThrow;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -64,13 +70,19 @@ public class PurchasingV1ApiE2ETest {
     private SignUpFacade signUpFacade;
 
     @Autowired
+    private PointWalletFacade pointWalletFacade;
+
+    @Autowired
     private ProductRepository productRepository;
 
     @Autowired
     private BrandRepository brandRepository;
 
-    @MockBean
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
+
+    @Autowired(required = false)
+    private CircuitBreakerRegistry circuitBreakerRegistry;
 
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
@@ -79,6 +91,10 @@ public class PurchasingV1ApiE2ETest {
     void tearDown() {
         databaseCleanUp.truncateAllTables();
         reset(paymentGatewayClient);
+        // 서킷 브레이커 상태 초기화
+        if (circuitBreakerRegistry != null) {
+            circuitBreakerRegistry.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
+        }
     }
 
     @DisplayName("POST /api/v1/orders")
@@ -92,15 +108,16 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
+            pointWalletFacade.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
-            brandRepository.save(brand);
-            Product product = Product.of("테스트 상품", 10_000, 10, brand.getId());
-            productRepository.save(product);
+            Brand savedBrand = brandRepository.save(brand);
+            Product product = Product.of("테스트 상품", 10_000, 10, savedBrand.getId());
+            Product savedProduct = productRepository.save(product);
 
             PurchasingV1Dto.CreateRequest requestBody = new PurchasingV1Dto.CreateRequest(
                 List.of(
-                    new PurchasingV1Dto.OrderItemRequest(product.getId(), 1, null)
+                    new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
                 new PurchasingV1Dto.PaymentRequest("SAMSUNG", "1234-5678-9012-3456")
             );
@@ -111,13 +128,8 @@ public class PurchasingV1ApiE2ETest {
             HttpEntity<PurchasingV1Dto.CreateRequest> httpEntity = new HttpEntity<>(requestBody, headers);
 
             // PG 결제 요청 타임아웃
-            when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-                .thenThrow(new FeignException.RequestTimeout(
-                    "Request timeout",
-                    Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                    null,
-                    Collections.emptyMap()
-                ));
+            doThrow(new RuntimeException(new SocketTimeoutException("Request timeout")))
+                .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
             // act
             ParameterizedTypeReference<ApiResponse<PurchasingV1Dto.OrderResponse>> responseType =
@@ -143,15 +155,16 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
+            pointWalletFacade.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
-            brandRepository.save(brand);
-            Product product = Product.of("테스트 상품", 10_000, 10, brand.getId());
-            productRepository.save(product);
+            Brand savedBrand = brandRepository.save(brand);
+            Product product = Product.of("테스트 상품", 10_000, 10, savedBrand.getId());
+            Product savedProduct = productRepository.save(product);
 
             PurchasingV1Dto.CreateRequest requestBody = new PurchasingV1Dto.CreateRequest(
                 List.of(
-                    new PurchasingV1Dto.OrderItemRequest(product.getId(), 1, null)
+                    new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
                 new PurchasingV1Dto.PaymentRequest("SAMSUNG", "1234-5678-9012-3456")
             );
@@ -161,13 +174,13 @@ public class PurchasingV1ApiE2ETest {
             headers.add("X-USER-ID", userId);
             HttpEntity<PurchasingV1Dto.CreateRequest> httpEntity = new HttpEntity<>(requestBody, headers);
 
-            // PG 결제 요청 실패
+            // PG 결제 요청 실패 (외부 시스템 장애 시뮬레이션)
             PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> failureResponse =
                 new PaymentGatewayDto.ApiResponse<>(
                     new PaymentGatewayDto.ApiResponse.Metadata(
                         PaymentGatewayDto.ApiResponse.Metadata.Result.FAIL,
-                        "PAYMENT_FAILED",
-                        "결제 처리에 실패했습니다"
+                        "INTERNAL_SERVER_ERROR",
+                        "PG 서버 내부 오류가 발생했습니다"
                     ),
                     null
                 );
@@ -198,15 +211,16 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
+            pointWalletFacade.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
-            brandRepository.save(brand);
-            Product product = Product.of("테스트 상품", 10_000, 10, brand.getId());
-            productRepository.save(product);
+            Brand savedBrand = brandRepository.save(brand);
+            Product product = Product.of("테스트 상품", 10_000, 10, savedBrand.getId());
+            Product savedProduct = productRepository.save(product);
 
             PurchasingV1Dto.CreateRequest requestBody = new PurchasingV1Dto.CreateRequest(
                 List.of(
-                    new PurchasingV1Dto.OrderItemRequest(product.getId(), 1, null)
+                    new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
                 new PurchasingV1Dto.PaymentRequest("SAMSUNG", "1234-5678-9012-3456")
             );
@@ -257,15 +271,16 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
+            pointWalletFacade.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
-            brandRepository.save(brand);
-            Product product = Product.of("테스트 상품", 10_000, 10, brand.getId());
-            productRepository.save(product);
+            Brand savedBrand = brandRepository.save(brand);
+            Product product = Product.of("테스트 상품", 10_000, 10, savedBrand.getId());
+            Product savedProduct = productRepository.save(product);
 
             PurchasingV1Dto.CreateRequest requestBody = new PurchasingV1Dto.CreateRequest(
                 List.of(
-                    new PurchasingV1Dto.OrderItemRequest(product.getId(), 1, null)
+                    new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
                 new PurchasingV1Dto.PaymentRequest("SAMSUNG", "1234-5678-9012-3456")
             );
@@ -274,6 +289,14 @@ public class PurchasingV1ApiE2ETest {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.add("X-USER-ID", userId);
             HttpEntity<PurchasingV1Dto.CreateRequest> httpEntity = new HttpEntity<>(requestBody, headers);
+
+            // 서킷 브레이커를 리셋하여 CLOSED 상태로 시작
+            if (circuitBreakerRegistry != null) {
+                CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+                if (circuitBreaker != null) {
+                    circuitBreaker.reset();
+                }
+            }
 
             // PG 서버 500 에러
             when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))

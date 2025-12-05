@@ -19,7 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -59,7 +60,7 @@ class PurchasingFacadePaymentCallbackTest {
     @Autowired
     private OrderRepository orderRepository;
 
-    @MockBean
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired
@@ -206,23 +207,11 @@ class PurchasingFacadePaymentCallbackTest {
             OrderItemCommand.of(product.getId(), 1)
         );
 
-        // PG 결제 요청 성공 (트랜잭션 키 반환)
+        // PG 결제 요청 타임아웃 (주문은 PENDING 상태로 유지)
+        // 콜백이 누락된 경우를 시뮬레이션하기 위해 결제 요청이 실패하도록 설정
         String transactionKey = "TXN123456";
-        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> paymentResponse =
-            new PaymentGatewayDto.ApiResponse<>(
-                new PaymentGatewayDto.ApiResponse.Metadata(
-                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
-                    null,
-                    null
-                ),
-                new PaymentGatewayDto.TransactionResponse(
-                    transactionKey,
-                    PaymentGatewayDto.TransactionStatus.PENDING,
-                    null
-                )
-            );
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenReturn(paymentResponse);
+        doThrow(new RuntimeException(new java.net.SocketTimeoutException("Request timeout")))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -282,13 +271,8 @@ class PurchasingFacadePaymentCallbackTest {
 
         // PG 결제 요청 타임아웃
         String transactionKey = "TXN123456";
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new feign.FeignException.RequestTimeout(
-                "Request timeout",
-                null,
-                null,
-                null
-            ));
+        doThrow(new RuntimeException(new java.net.SocketTimeoutException("Request timeout")))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -340,23 +324,10 @@ class PurchasingFacadePaymentCallbackTest {
             OrderItemCommand.of(product.getId(), 1)
         );
 
-        // PG 결제 요청 성공 (트랜잭션 키 반환)
+        // PG 결제 요청 타임아웃 (초기 주문은 PENDING 상태로 유지)
         String transactionKey = "TXN123456";
-        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> paymentResponse =
-            new PaymentGatewayDto.ApiResponse<>(
-                new PaymentGatewayDto.ApiResponse.Metadata(
-                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
-                    null,
-                    null
-                ),
-                new PaymentGatewayDto.TransactionResponse(
-                    transactionKey,
-                    PaymentGatewayDto.TransactionStatus.PENDING,
-                    null
-                )
-            );
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenReturn(paymentResponse);
+        doThrow(new RuntimeException(new java.net.SocketTimeoutException("Request timeout")))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),

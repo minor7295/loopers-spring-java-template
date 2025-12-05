@@ -15,16 +15,24 @@ import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
+import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +64,30 @@ class PurchasingFacadeTest {
     
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
+    
+    @MockitoBean
+    private PaymentGatewayClient paymentGatewayClient;
+
+    @BeforeEach
+    void setUp() {
+        // 기본적으로 모든 테스트에서 결제 성공 응답을 반환하도록 설정
+        // 개별 테스트에서 필요시 재설정 가능
+        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> successResponse =
+            new PaymentGatewayDto.ApiResponse<>(
+                new PaymentGatewayDto.ApiResponse.Metadata(
+                    PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS,
+                    null,
+                    null
+                ),
+                new PaymentGatewayDto.TransactionResponse(
+                    "TXN123456",
+                    PaymentGatewayDto.TransactionStatus.SUCCESS,
+                    null
+                )
+            );
+        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
+            .thenReturn(successResponse);
+    }
 
     @AfterEach
     void tearDown() {
@@ -121,7 +153,7 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(user.getUserId(), commands);
+        OrderInfo orderInfo = purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // assert
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
@@ -145,7 +177,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> emptyCommands = List.of();
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, emptyCommands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, emptyCommands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
     }
@@ -160,7 +192,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(unknownUserId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(unknownUserId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -182,7 +214,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -212,7 +244,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -242,7 +274,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -272,7 +304,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -292,7 +324,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        purchasingFacade.createOrder(user.getUserId(), commands);
+        purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // act
         List<OrderInfo> orders = purchasingFacade.getOrders(user.getUserId());
@@ -313,7 +345,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        OrderInfo createdOrder = purchasingFacade.createOrder(user.getUserId(), commands);
+        OrderInfo createdOrder = purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // act
         OrderInfo found = purchasingFacade.getOrder(user.getUserId(), createdOrder.orderId());
@@ -338,7 +370,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        OrderInfo user1Order = purchasingFacade.createOrder(user1Id, commands);
+        OrderInfo user1Order = purchasingFacade.createOrder(user1Id, commands, "SAMSUNG", "1234-5678-9012-3456");
         final Long orderId = user1Order.orderId();
 
         // act & assert
@@ -370,7 +402,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -412,7 +444,7 @@ class PurchasingFacadeTest {
         final int totalAmount = (10_000 * 3) + (15_000 * 2);
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // assert
         // 주문이 정상적으로 생성되었는지 확인
@@ -452,7 +484,7 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // assert
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
@@ -481,7 +513,7 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands);
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456");
 
         // assert
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
@@ -507,7 +539,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -530,7 +562,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -554,7 +586,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "1234-5678-9012-3456"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
     }

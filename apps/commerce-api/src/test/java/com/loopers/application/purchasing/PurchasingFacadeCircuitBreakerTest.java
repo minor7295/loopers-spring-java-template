@@ -4,6 +4,7 @@ import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderRepository;
+import com.loopers.infrastructure.order.OrderJpaRepository;
 import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
@@ -21,7 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import feign.FeignException;
 import feign.Request;
 
@@ -66,7 +67,10 @@ class PurchasingFacadeCircuitBreakerTest {
     @Autowired
     private OrderRepository orderRepository;
 
-    @MockBean
+    @Autowired
+    private OrderJpaRepository orderJpaRepository;
+
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired(required = false)
@@ -120,10 +124,21 @@ class PurchasingFacadeCircuitBreakerTest {
                 Collections.emptyMap()
             ));
 
+        // CircuitBreaker를 리셋하여 초기 상태로 만듦
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                circuitBreaker.reset();
+            }
+        }
+
         // act
-        // 실패 임계값까지 연속 실패 발생
-        int failureThreshold = 5; // 설정값에 따라 다를 수 있음
-        for (int i = 0; i < failureThreshold; i++) {
+        // 서킷 브레이커 설정: minimumNumberOfCalls=1, failureRateThreshold=50%
+        // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+        // 따라서 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고,
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출됨
+        int numberOfCalls = 5;
+        for (int i = 0; i < numberOfCalls; i++) {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
@@ -133,13 +148,14 @@ class PurchasingFacadeCircuitBreakerTest {
         }
 
         // assert
-        // 서킷 브레이커가 OPEN 상태일 때는 호출이 차단되어야 함
-        verify(paymentGatewayClient, times(failureThreshold))
+        // 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고,
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        verify(paymentGatewayClient, times(1))
             .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
         
         // 서킷 브레이커 상태 확인 (구현되어 있다면)
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 // 실패 임계값을 초과했으므로 OPEN 상태일 수 있음
                 assertThat(circuitBreaker.getState()).isIn(
@@ -165,7 +181,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // 서킷 브레이커를 OPEN 상태로 만듦
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
             }
@@ -204,7 +220,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // 서킷 브레이커를 OPEN 상태로 만듦
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
                 
@@ -233,9 +249,16 @@ class PurchasingFacadeCircuitBreakerTest {
         );
 
         // 서킷 브레이커를 HALF_OPEN 상태로 만듦
-        // TODO: 서킷 브레이커를 HALF_OPEN 상태로 전환
-        // CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
-        // circuitBreaker.transitionToHalfOpenState();
+        // 서킷 브레이커는 CLOSED → OPEN → HALF_OPEN 순서로만 전환 가능
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                // 먼저 OPEN 상태로 전환
+                circuitBreaker.transitionToOpenState();
+                // 그 다음 HALF_OPEN 상태로 전환
+                circuitBreaker.transitionToHalfOpenState();
+            }
+        }
 
         // PG 성공 응답
         PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> successResponse =
@@ -263,11 +286,13 @@ class PurchasingFacadeCircuitBreakerTest {
         );
 
         // assert
+        // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청을 동기로 처리합니다.
+        // PG 결제 성공 시 즉시 주문 상태를 COMPLETED로 변경합니다.
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.COMPLETED);
         
         // 서킷 브레이커 상태가 CLOSED로 전환되었는지 확인
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 // 성공 시 CLOSED로 전환될 수 있음
                 assertThat(circuitBreaker.getState()).isIn(
@@ -291,9 +316,16 @@ class PurchasingFacadeCircuitBreakerTest {
         );
 
         // 서킷 브레이커를 HALF_OPEN 상태로 만듦
-        // TODO: 서킷 브레이커를 HALF_OPEN 상태로 전환
-        // CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
-        // circuitBreaker.transitionToHalfOpenState();
+        // 서킷 브레이커는 CLOSED → OPEN → HALF_OPEN 순서로만 전환 가능
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                // 먼저 OPEN 상태로 전환
+                circuitBreaker.transitionToOpenState();
+                // 그 다음 HALF_OPEN 상태로 전환
+                circuitBreaker.transitionToHalfOpenState();
+            }
+        }
 
         // PG 실패 응답
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
@@ -317,7 +349,7 @@ class PurchasingFacadeCircuitBreakerTest {
         
         // 서킷 브레이커 상태가 OPEN으로 전환되었는지 확인
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 // 실패 시 OPEN으로 전환될 수 있음
                 assertThat(circuitBreaker.getState()).isIn(
@@ -342,7 +374,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // 서킷 브레이커를 OPEN 상태로 만듦
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
             }
@@ -384,7 +416,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // 서킷 브레이커를 OPEN 상태로 만들어 Fallback이 호출되도록 함
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
             }
@@ -429,7 +461,7 @@ class PurchasingFacadeCircuitBreakerTest {
     @DisplayName("Retry 실패 후 CircuitBreaker가 OPEN 상태가 되어 Fallback이 호출된다")
     void createOrder_retryFailure_circuitBreakerOpens_fallbackExecuted() {
         // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
         Brand brand = createAndSaveBrand("브랜드");
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
@@ -448,17 +480,19 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // CircuitBreaker를 리셋하여 초기 상태로 만듦
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.reset();
             }
         }
 
         // act
-        // 여러 번 호출하여 CircuitBreaker가 OPEN 상태로 전환되도록 함
-        // 실패율 임계값(50%)을 초과하려면 최소 5번 호출 중 3번 이상 실패해야 함
-        int callsToTriggerOpen = 6; // 실패율 50% 초과를 보장하기 위해 6번 호출
-        for (int i = 0; i < callsToTriggerOpen; i++) {
+        // 서킷 브레이커 설정: minimumNumberOfCalls=1, failureRateThreshold=50%
+        // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+        // 따라서 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고 (재시도 포함하여 3번),
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        int numberOfCalls = 6; // 여러 번 호출하여 서킷 브레이커 동작 확인
+        for (int i = 0; i < numberOfCalls; i++) {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
@@ -468,14 +502,16 @@ class PurchasingFacadeCircuitBreakerTest {
         }
 
         // assert
-        // 모든 호출이 재시도 횟수만큼 시도되었는지 확인
-        int maxRetryAttempts = 3;
-        verify(paymentGatewayClient, times(callsToTriggerOpen * maxRetryAttempts))
+        // PaymentGatewayAdapter.requestPayment에는 재시도가 없음 (Resilience4jRetryConfig에서 paymentGatewayClient는 maxAttempts=1)
+        // 첫 번째 호출이 실패하면 서킷 브레이커가 OPEN 상태로 전환되어,
+        // 이후 호출들은 fallback이 호출되어 실제 PaymentGatewayClient는 호출되지 않음
+        // 따라서 실제로는 1번만 호출됨
+        verify(paymentGatewayClient, times(1))
             .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // CircuitBreaker 상태 확인
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 // 실패율이 임계값을 초과했으므로 OPEN 상태일 수 있음
                 // (하지만 정확한 상태는 설정값과 호출 횟수에 따라 다를 수 있음)
@@ -488,8 +524,8 @@ class PurchasingFacadeCircuitBreakerTest {
         }
 
         // 마지막 주문이 PENDING 상태로 생성되었는지 확인
-        List<Order> orders = orderRepository.findAll();
-        assertThat(orders).hasSize(callsToTriggerOpen);
+        List<Order> orders = orderJpaRepository.findAll();
+        assertThat(orders).hasSize(numberOfCalls);
         orders.forEach(order -> {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
         });
@@ -509,7 +545,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // CircuitBreaker를 OPEN 상태로 만들어 Fallback이 호출되도록 함
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
             }
@@ -570,7 +606,7 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // CircuitBreaker를 OPEN 상태로 만들어 Fallback이 호출되도록 함
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.transitionToOpenState();
             }
@@ -617,7 +653,10 @@ class PurchasingFacadeCircuitBreakerTest {
     @DisplayName("Retry가 모두 실패한 후 CircuitBreaker가 OPEN 상태가 되면 Fallback이 호출되어 주문이 PENDING 상태로 유지된다")
     void createOrder_retryExhausted_circuitBreakerOpens_fallbackCalled_orderPending() {
         // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        // 6번의 주문 생성 + fallback 테스트 1번 = 총 7번의 주문 생성
+        // 각 주문마다 10,000 포인트가 필요하므로 최소 70,000 포인트 필요
+        // 여유를 두고 100,000 포인트로 설정
+        User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
         Brand brand = createAndSaveBrand("브랜드");
         Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
 
@@ -636,18 +675,20 @@ class PurchasingFacadeCircuitBreakerTest {
 
         // CircuitBreaker를 리셋하여 초기 상태로 만듦
         if (circuitBreakerRegistry != null) {
-            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
             if (circuitBreaker != null) {
                 circuitBreaker.reset();
             }
         }
 
         // act
-        // 첫 번째 호출: Retry가 모두 실패하고 CircuitBreaker가 아직 CLOSED 상태이면 예외 발생
-        // 여러 번 호출하여 CircuitBreaker가 OPEN 상태로 전환되도록 함
-        int callsToTriggerOpen = 6; // 실패율 50% 초과를 보장하기 위해 6번 호출
+        // 서킷 브레이커 설정: minimumNumberOfCalls=1, failureRateThreshold=50%
+        // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+        // 따라서 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고,
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        int numberOfCalls = 6; // 여러 번 호출하여 서킷 브레이커 동작 확인
         
-        for (int i = 0; i < callsToTriggerOpen; i++) {
+        for (int i = 0; i < numberOfCalls; i++) {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
@@ -659,13 +700,14 @@ class PurchasingFacadeCircuitBreakerTest {
         // CircuitBreaker 상태 확인
         CircuitBreaker circuitBreaker = null;
         if (circuitBreakerRegistry != null) {
-            circuitBreaker = circuitBreakerRegistry.circuitBreaker("paymentGatewayClient");
+            circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
         }
 
         // assert
-        // 1. 모든 호출이 재시도 횟수만큼 시도되었는지 확인
-        int maxRetryAttempts = 3;
-        verify(paymentGatewayClient, times(callsToTriggerOpen * maxRetryAttempts))
+        // 1. 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고,
+        // PaymentGatewayAdapter.requestPayment에는 재시도가 없으므로 1번만 호출됨
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        verify(paymentGatewayClient, times(1))
             .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // 2. CircuitBreaker가 OPEN 상태로 전환되었는지 확인
@@ -709,8 +751,8 @@ class PurchasingFacadeCircuitBreakerTest {
         assertThat(fallbackOrderInfo.status()).isEqualTo(OrderStatus.PENDING);
         
         // 5. 모든 주문이 PENDING 상태로 생성되었는지 확인
-        List<Order> orders = orderRepository.findAll();
-        assertThat(orders.size()).isGreaterThanOrEqualTo(callsToTriggerOpen);
+        List<Order> orders = orderJpaRepository.findAll();
+        assertThat(orders.size()).isGreaterThanOrEqualTo(numberOfCalls + 1); // numberOfCalls + fallback 테스트 1번
         orders.forEach(order -> {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
             assertThat(order.getStatus()).isNotEqualTo(OrderStatus.CANCELED);

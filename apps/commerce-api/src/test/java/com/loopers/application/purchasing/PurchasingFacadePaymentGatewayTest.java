@@ -21,11 +21,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import feign.FeignException;
 import feign.Request;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 
 import java.util.List;
@@ -67,7 +68,7 @@ class PurchasingFacadePaymentGatewayTest {
     @Autowired
     private OrderRepository orderRepository;
 
-    @MockBean
+    @MockitoBean
     private PaymentGatewayClient paymentGatewayClient;
 
     @Autowired
@@ -106,13 +107,8 @@ class PurchasingFacadePaymentGatewayTest {
         );
 
         // PG 결제 요청이 타임아웃 발생
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Request timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        doThrow(new RuntimeException(new SocketTimeoutException("Request timeout")))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(
@@ -150,13 +146,13 @@ class PurchasingFacadePaymentGatewayTest {
             OrderItemCommand.of(product.getId(), 1)
         );
 
-        // PG 결제 요청이 실패
+        // PG 결제 요청이 실패 (외부 시스템 장애 - 주문은 PENDING 상태로 유지)
         PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> failureResponse =
             new PaymentGatewayDto.ApiResponse<>(
                 new PaymentGatewayDto.ApiResponse.Metadata(
                     PaymentGatewayDto.ApiResponse.Metadata.Result.FAIL,
-                    "PAYMENT_FAILED",
-                    "결제 처리에 실패했습니다"
+                    "INTERNAL_SERVER_ERROR",  // 외부 시스템 장애로 분류되어 주문이 PENDING 상태로 유지됨
+                    "서버 오류가 발생했습니다"
                 ),
                 null
             );
@@ -311,13 +307,8 @@ class PurchasingFacadePaymentGatewayTest {
         );
 
         // PG 결제 요청이 타임아웃 발생
-        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout(
-                "Request timeout",
-                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
-                null,
-                Collections.emptyMap()
-            ));
+        doThrow(new RuntimeException(new SocketTimeoutException("Request timeout")))
+            .when(paymentGatewayClient).requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(
