@@ -20,7 +20,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.util.Collections;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
@@ -101,7 +105,12 @@ class PurchasingFacadePaymentRecoveryTest {
         // PG 결제 요청 타임아웃으로 PENDING 상태 주문 생성
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -162,7 +171,12 @@ class PurchasingFacadePaymentRecoveryTest {
         // PG 결제 요청 타임아웃으로 PENDING 상태 주문 생성
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -223,7 +237,12 @@ class PurchasingFacadePaymentRecoveryTest {
         // PG 결제 요청 타임아웃
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -285,7 +304,12 @@ class PurchasingFacadePaymentRecoveryTest {
         // PG 결제 요청 타임아웃으로 PENDING 상태 주문 생성
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -354,7 +378,12 @@ class PurchasingFacadePaymentRecoveryTest {
         // PG 결제 요청 타임아웃으로 PENDING 상태 주문 생성
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
@@ -366,7 +395,12 @@ class PurchasingFacadePaymentRecoveryTest {
 
         // 상태 확인 API도 실패
         when(paymentGatewayClient.getTransaction(anyString(), eq(transactionKey)))
-            .thenThrow(new FeignException.ServiceUnavailable("Service unavailable", null, null, null));
+            .thenThrow(new FeignException.ServiceUnavailable(
+                "Service unavailable",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act
         // Note: recoverOrderStatusByTransactionKey 메서드가 구현되어 있다고 가정

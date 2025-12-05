@@ -22,9 +22,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreakerFactory;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
 import org.springframework.test.context.ActiveProfiles;
+
+import java.util.Collections;
 
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -105,7 +107,12 @@ class PurchasingFacadePaymentGatewayTest {
 
         // PG 결제 요청이 타임아웃 발생
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(
@@ -231,13 +238,11 @@ class PurchasingFacadePaymentGatewayTest {
 
         // PG 서버가 500 에러 반환
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // act
@@ -270,7 +275,12 @@ class PurchasingFacadePaymentGatewayTest {
 
         // PG 연결 실패
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.ServiceUnavailable("Service unavailable", null, null, null));
+            .thenThrow(new FeignException.ServiceUnavailable(
+                "Service unavailable",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(
@@ -302,7 +312,12 @@ class PurchasingFacadePaymentGatewayTest {
 
         // PG 결제 요청이 타임아웃 발생
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(

@@ -20,7 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
+
+import java.util.Collections;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -109,7 +112,12 @@ public class PurchasingV1ApiE2ETest {
 
             // PG 결제 요청 타임아웃
             when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-                .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+                .thenThrow(new FeignException.RequestTimeout(
+                    "Request timeout",
+                    Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                    null,
+                    Collections.emptyMap()
+                ));
 
             // act
             ParameterizedTypeReference<ApiResponse<PurchasingV1Dto.OrderResponse>> responseType =
@@ -269,13 +277,11 @@ public class PurchasingV1ApiE2ETest {
 
             // PG 서버 500 에러
             when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-                .thenThrow(FeignException.InternalServerError.create(
-                    500,
+                .thenThrow(new FeignException.InternalServerError(
                     "Internal Server Error",
+                    Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                     null,
-                    null,
-                    null,
-                    null
+                    Collections.emptyMap()
                 ));
 
             // act

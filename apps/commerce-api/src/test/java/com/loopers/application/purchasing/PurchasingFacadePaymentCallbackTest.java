@@ -283,7 +283,7 @@ class PurchasingFacadePaymentCallbackTest {
         // PG 결제 요청 타임아웃
         String transactionKey = "TXN123456";
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new org.springframework.cloud.openfeign.FeignException.RequestTimeout(
+            .thenThrow(new feign.FeignException.RequestTimeout(
                 "Request timeout",
                 null,
                 null,

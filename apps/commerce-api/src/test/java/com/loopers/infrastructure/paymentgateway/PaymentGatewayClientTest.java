@@ -7,8 +7,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
 import org.springframework.test.context.ActiveProfiles;
+
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,7 +60,12 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 타임아웃 예외 발생
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
@@ -80,7 +88,12 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 연결 실패 예외 발생
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.ConnectTimeout("Connection timeout", null, null, null));
+            .thenThrow(new FeignException.ConnectTimeout(
+                "Connection timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
@@ -103,7 +116,12 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 읽기 타임아웃 예외 발생
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Read timed out", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Read timed out",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.requestPayment(userId, request))
@@ -120,7 +138,12 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 타임아웃 예외 발생
         when(paymentGatewayClient.getTransaction(anyString(), anyString()))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null));
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
 
         // act & assert
         assertThatThrownBy(() -> paymentGatewayClient.getTransaction(userId, transactionKey))
@@ -143,13 +166,11 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 500 에러 반환
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // act & assert
@@ -173,13 +194,11 @@ class PaymentGatewayClientTest {
 
         // Mock 서버에서 400 에러 반환
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.BadRequest.create(
-                400,
+            .thenThrow(new FeignException.BadRequest(
                 "Bad Request",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // act & assert

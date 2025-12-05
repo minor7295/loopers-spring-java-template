@@ -20,7 +20,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
+
+import java.util.Collections;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
@@ -116,13 +119,11 @@ class PurchasingFacadeRetryTest {
             );
 
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ))
             .thenReturn(successResponse);
 
@@ -156,13 +157,11 @@ class PurchasingFacadeRetryTest {
 
         // 모든 재시도 실패
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // act
@@ -212,7 +211,12 @@ class PurchasingFacadeRetryTest {
             );
 
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(new FeignException.RequestTimeout("Request timeout", null, null, null))
+            .thenThrow(new FeignException.RequestTimeout(
+                "Request timeout",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ))
             .thenReturn(successResponse);
 
         // act
@@ -260,13 +264,11 @@ class PurchasingFacadeRetryTest {
             );
 
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ))
             .thenReturn(successResponse);
 
@@ -311,13 +313,11 @@ class PurchasingFacadeRetryTest {
 
         // 400 에러 (클라이언트 오류)
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.BadRequest.create(
-                400,
+            .thenThrow(new FeignException.BadRequest(
                 "Bad Request",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // act

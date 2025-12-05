@@ -16,13 +16,16 @@ import com.loopers.testutil.CircuitBreakerTestUtil;
 import com.loopers.utils.DatabaseCleanUp;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.cloud.openfeign.FeignException;
+import feign.FeignException;
+import feign.Request;
+import java.util.Collections;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
@@ -124,13 +127,11 @@ class CircuitBreakerLoadTest {
 
         // PG 연속 실패 시뮬레이션 (5xx 서버 오류)
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.InternalServerError.create(
-                500,
+            .thenThrow(new FeignException.InternalServerError(
                 "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // Circuit Breaker 리셋
@@ -221,13 +222,11 @@ class CircuitBreakerLoadTest {
 
         // PG 연속 실패 시뮬레이션
         when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
-            .thenThrow(FeignException.ServiceUnavailable.create(
-                503,
+            .thenThrow(new FeignException.ServiceUnavailable(
                 "Service Unavailable",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
                 null,
-                null,
-                null,
-                null
+                Collections.emptyMap()
             ));
 
         // Circuit Breaker 리셋
