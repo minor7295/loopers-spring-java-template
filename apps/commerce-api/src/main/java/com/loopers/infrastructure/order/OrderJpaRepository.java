@@ -10,6 +10,8 @@ import java.util.List;
  */
 public interface OrderJpaRepository extends JpaRepository<Order, Long> {
     List<Order> findAllByUserId(Long userId);
+    
+    List<Order> findAllByStatus(com.loopers.domain.order.OrderStatus status);
 }
 
 

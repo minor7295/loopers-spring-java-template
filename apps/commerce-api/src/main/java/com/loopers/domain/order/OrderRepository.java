@@ -34,6 +34,14 @@ public interface OrderRepository {
      * @return 해당 사용자의 주문 목록
      */
     List<Order> findAllByUserId(Long userId);
+
+    /**
+     * 주문 상태로 주문 목록을 조회합니다.
+     *
+     * @param status 주문 상태
+     * @return 해당 상태의 주문 목록
+     */
+    List<Order> findAllByStatus(OrderStatus status);
 }
 
 
