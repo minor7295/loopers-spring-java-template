@@ -1,8 +1,8 @@
 package com.loopers.domain.order;
 
+import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -10,9 +10,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 주문 상태 업데이트 도메인 서비스.
+ * 주문 결제 결과 처리 도메인 서비스.
  * <p>
- * 결제 상태에 따라 주문 상태를 업데이트합니다.
+ * 결제 결과에 따라 주문 상태를 처리합니다.
  * </p>
  *
  * @author Loopers
@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class OrderStatusUpdater {
+public class OrderPaymentResultService {
     
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
@@ -34,7 +34,7 @@ public class OrderStatusUpdater {
      * </p>
      *
      * @param orderId 주문 ID
-     * @param status 결제 상태
+     * @param paymentStatus 결제 상태 (도메인 모델)
      * @param transactionKey 트랜잭션 키
      * @param reason 실패 사유 (실패 시)
      * @return 업데이트 성공 여부 (true: 성공, false: 실패)
@@ -42,7 +42,7 @@ public class OrderStatusUpdater {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean updateByPaymentStatus(
         Long orderId,
-        PaymentGatewayDto.TransactionStatus status,
+        PaymentStatus paymentStatus,
         String transactionKey,
         String reason
     ) {
@@ -66,14 +66,14 @@ public class OrderStatusUpdater {
                 return true;
             }
             
-            if (status == PaymentGatewayDto.TransactionStatus.SUCCESS) {
+            if (paymentStatus == PaymentStatus.SUCCESS) {
                 // 결제 성공: 주문 완료
                 order.complete();
                 orderRepository.save(order);
                 log.info("결제 상태 확인 결과, 주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})",
                     orderId, transactionKey);
                 return true;
-            } else if (status == PaymentGatewayDto.TransactionStatus.FAILED) {
+            } else if (paymentStatus == PaymentStatus.FAILED) {
                 // 결제 실패: 주문 취소 및 리소스 원복
                 User user = userRepository.findById(order.getUserId());
                 if (user == null) {
