@@ -1,7 +1,7 @@
 package com.loopers.infrastructure.paymentgateway;
 
 import com.loopers.application.purchasing.PaymentRequest;
-import com.loopers.domain.order.PaymentResult;
+import com.loopers.domain.payment.PaymentResult;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
