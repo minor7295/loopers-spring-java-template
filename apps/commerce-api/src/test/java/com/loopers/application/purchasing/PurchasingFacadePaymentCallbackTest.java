@@ -121,6 +121,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -197,6 +198,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -268,6 +270,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );

@@ -1,5 +1,6 @@
 package com.loopers.domain.order;
 
+import com.loopers.domain.payment.PaymentService;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Gender;
@@ -40,6 +41,9 @@ public class OrderCancellationServiceTest {
     @Mock
     private ProductRepository productRepository;
 
+    @Mock
+    private PaymentService paymentService;
+
     @InjectMocks
     private OrderCancellationService orderCancellationService;
 
@@ -66,6 +70,8 @@ public class OrderCancellationServiceTest {
             when(orderRepository.save(any(Order.class))).thenReturn(order);
             when(userRepository.save(any(User.class))).thenReturn(user);
             when(productRepository.save(any(Product.class))).thenReturn(product1, product2);
+            // Payment가 없는 경우 (포인트를 사용하지 않은 주문)
+            when(paymentService.findByOrderId(any(Long.class))).thenReturn(Optional.empty());
 
             // act
             orderCancellationService.cancel(order, user);

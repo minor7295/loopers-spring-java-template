@@ -77,16 +77,22 @@ public class PaymentTest {
             // arrange
             Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
             Long userId = PaymentTestFixture.ValidPayment.USER_ID;
-            Long totalAmount = PaymentTestFixture.ValidPayment.AMOUNT;
-            Long usedPoint = 0L; // 포인트 미사용
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
 
             // act
-            Payment payment = Payment.of(orderId, userId, totalAmount, usedPoint, PaymentTestFixture.ValidPayment.REQUESTED_AT);
+            Payment payment = Payment.of(
+                orderId,
+                userId,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
+                amount,
+                PaymentTestFixture.ValidPayment.REQUESTED_AT
+            );
 
             // assert
             assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
-            assertThat(payment.getUsedPoint()).isEqualTo(usedPoint);
-            assertThat(payment.getPaidAmount()).isEqualTo(totalAmount);
+            assertThat(payment.getUsedPoint()).isEqualTo(0L);
+            assertThat(payment.getPaidAmount()).isEqualTo(amount);
         }
 
         @DisplayName("포인트로 부분 결제하면 PENDING 상태로 생성된다.")
@@ -96,10 +102,18 @@ public class PaymentTest {
             Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
             Long userId = PaymentTestFixture.ValidPayment.USER_ID;
             Long totalAmount = PaymentTestFixture.ValidPayment.AMOUNT;
-            Long usedPoint = totalAmount / 2; // 포인트로 절반 결제
+            Long usedPoint = PaymentTestFixture.ValidPayment.PARTIAL_POINT; // 포인트로 절반 결제
 
             // act
-            Payment payment = Payment.of(orderId, userId, totalAmount, usedPoint, PaymentTestFixture.ValidPayment.REQUESTED_AT);
+            Payment payment = Payment.of(
+                orderId,
+                userId,
+                totalAmount,
+                usedPoint,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
+                PaymentTestFixture.ValidPayment.REQUESTED_AT
+            );
 
             // assert
             assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
@@ -114,8 +128,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime completedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);
@@ -135,8 +150,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime completedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);
@@ -158,8 +174,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             payment.toFailed("실패 사유", LocalDateTime.now());
@@ -180,8 +197,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             payment.toSuccess(LocalDateTime.now());
@@ -202,8 +220,9 @@ public class PaymentTest {
             Payment successPayment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             successPayment.toSuccess(LocalDateTime.now());
@@ -211,8 +230,9 @@ public class PaymentTest {
             Payment failedPayment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             failedPayment.toFailed("ERROR", LocalDateTime.now());
@@ -220,8 +240,9 @@ public class PaymentTest {
             Payment pendingPayment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
 
@@ -238,8 +259,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime firstCompletedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);
@@ -261,8 +283,9 @@ public class PaymentTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime firstCompletedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);

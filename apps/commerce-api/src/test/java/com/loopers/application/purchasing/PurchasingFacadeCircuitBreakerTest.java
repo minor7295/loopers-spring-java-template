@@ -142,6 +142,7 @@ class PurchasingFacadeCircuitBreakerTest {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
+                null,
                 "SAMSUNG",
                 "4111-1111-1111-1111"
             );
@@ -189,6 +190,7 @@ class PurchasingFacadeCircuitBreakerTest {
         purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -244,6 +246,7 @@ class PurchasingFacadeCircuitBreakerTest {
         purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -299,6 +302,7 @@ class PurchasingFacadeCircuitBreakerTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -337,9 +341,11 @@ class PurchasingFacadeCircuitBreakerTest {
         }
 
         // act
+        // 포인트를 사용하지 않고 카드로만 결제 (Circuit Breaker OPEN 상태에서도 주문은 PENDING 상태로 유지)
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -350,12 +356,13 @@ class PurchasingFacadeCircuitBreakerTest {
         assertThat(orderInfo.orderId()).isNotNull();
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
         
-        // 재고와 포인트는 정상적으로 차감되어야 함
+        // 재고는 정상적으로 차감되어야 함
         Product savedProduct = productRepository.findById(product.getId()).orElseThrow();
         assertThat(savedProduct.getStock()).isEqualTo(9);
         
+        // 포인트는 사용하지 않았으므로 차감되지 않음
         User savedUser = userRepository.findByUserId(user.getUserId());
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(40_000L);
+        assertThat(savedUser.getPoint().getValue()).isEqualTo(50_000L);
     }
 
     @Test
@@ -396,6 +403,7 @@ class PurchasingFacadeCircuitBreakerTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -452,6 +460,7 @@ class PurchasingFacadeCircuitBreakerTest {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
+                null,
                 "SAMSUNG",
                 "4111-1111-1111-1111"
             );
@@ -519,9 +528,11 @@ class PurchasingFacadeCircuitBreakerTest {
             .thenReturn(fallbackResponse);
 
         // act
+        // 포인트를 사용하지 않고 카드로만 결제 (Circuit Breaker OPEN 상태에서도 주문은 PENDING 상태로 유지)
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -537,12 +548,13 @@ class PurchasingFacadeCircuitBreakerTest {
         // 3. CIRCUIT_BREAKER_OPEN은 외부 시스템 장애로 간주되므로 주문 취소가 발생하지 않아야 함
         assertThat(savedOrder.getStatus()).isNotEqualTo(OrderStatus.CANCELED);
         
-        // 4. 재고와 포인트는 정상적으로 차감되어야 함 (주문은 생성되었지만 결제는 PENDING)
+        // 4. 재고는 정상적으로 차감되어야 함 (주문은 생성되었지만 결제는 PENDING)
         Product savedProduct = productRepository.findById(product.getId()).orElseThrow();
         assertThat(savedProduct.getStock()).isEqualTo(9);
         
+        // 포인트는 사용하지 않았으므로 차감되지 않음
         User savedUser = userRepository.findByUserId(user.getUserId());
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(40_000L);
+        assertThat(savedUser.getPoint().getValue()).isEqualTo(50_000L);
     }
 
     @Test
@@ -582,6 +594,7 @@ class PurchasingFacadeCircuitBreakerTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );
@@ -645,6 +658,7 @@ class PurchasingFacadeCircuitBreakerTest {
             purchasingFacade.createOrder(
                 user.getUserId(),
                 commands,
+                null,
                 "SAMSUNG",
                 "4111-1111-1111-1111"
             );
@@ -692,6 +706,7 @@ class PurchasingFacadeCircuitBreakerTest {
         OrderInfo fallbackOrderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111"
         );

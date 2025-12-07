@@ -153,7 +153,7 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo orderInfo = purchasingFacade.createOrder(user.getUserId(), commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
         // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
@@ -165,9 +165,9 @@ class PurchasingFacadeTest {
         assertThat(savedProduct1.getStock()).isEqualTo(8); // 10 - 2
         assertThat(savedProduct2.getStock()).isEqualTo(4); // 5 - 1
         
-        // 포인트 차감 확인
+        // 포인트 차감 확인 (usedPoint가 null이므로 포인트 차감 없음)
         User savedUser = userRepository.findByUserId(user.getUserId());
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(25_000L); // 50_000 - (10_000 * 2 + 5_000 * 1)
+        assertThat(savedUser.getPoint().getValue()).isEqualTo(50_000L); // 포인트 차감 없음
     }
 
     @Test
@@ -178,7 +178,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> emptyCommands = List.of();
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, emptyCommands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, emptyCommands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
     }
@@ -193,7 +193,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(unknownUserId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(unknownUserId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -215,7 +215,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -245,7 +245,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -275,7 +275,8 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        // 포인트를 사용하려고 하지만 잔액이 부족한 경우
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, 10_000L, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -305,7 +306,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -325,7 +326,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "4111-1111-1111-1111");
+        purchasingFacade.createOrder(user.getUserId(), commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // act
         List<OrderInfo> orders = purchasingFacade.getOrders(user.getUserId());
@@ -347,7 +348,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        OrderInfo createdOrder = purchasingFacade.createOrder(user.getUserId(), commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo createdOrder = purchasingFacade.createOrder(user.getUserId(), commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // act
         OrderInfo found = purchasingFacade.getOrder(user.getUserId(), createdOrder.orderId());
@@ -373,7 +374,7 @@ class PurchasingFacadeTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(product.getId(), 1)
         );
-        OrderInfo user1Order = purchasingFacade.createOrder(user1Id, commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo user1Order = purchasingFacade.createOrder(user1Id, commands, null, "SAMSUNG", "4111-1111-1111-1111");
         final Long orderId = user1Order.orderId();
 
         // act & assert
@@ -405,7 +406,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
 
@@ -447,7 +448,7 @@ class PurchasingFacadeTest {
         final int totalAmount = (10_000 * 3) + (15_000 * 2);
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
         // 주문이 정상적으로 생성되었는지 확인
@@ -461,9 +462,9 @@ class PurchasingFacadeTest {
         assertThat(savedProduct1.getStock()).isEqualTo(initialStock1 - 3);
         assertThat(savedProduct2.getStock()).isEqualTo(initialStock2 - 2);
         
-        // 포인트가 정상적으로 차감되었는지 확인
+        // 포인트 차감 확인 (usedPoint가 null이므로 포인트 차감 없음)
         User savedUser = userRepository.findByUserId(userId);
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(initialPoint - totalAmount);
+        assertThat(savedUser.getPoint().getValue()).isEqualTo(initialPoint); // 포인트 차감 없음
         
         // 주문이 저장되었는지 확인
         List<OrderInfo> orders = purchasingFacade.getOrders(userId);
@@ -488,10 +489,10 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
-        // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
+        // 쿠폰 할인 후 남은 금액(5,000원)을 카드로 결제해야 하므로 주문은 PENDING 상태로 유지됨
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(orderInfo.totalAmount()).isEqualTo(5_000); // 10,000 - 5,000 = 5,000
 
@@ -518,7 +519,7 @@ class PurchasingFacadeTest {
         );
 
         // act
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
         // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
@@ -545,7 +546,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -568,7 +569,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -592,7 +593,7 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111"))
+        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
     }

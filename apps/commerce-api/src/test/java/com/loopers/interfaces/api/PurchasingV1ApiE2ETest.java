@@ -119,7 +119,7 @@ public class PurchasingV1ApiE2ETest {
             List.of(
                 new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
             ),
-            new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+            new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -252,7 +252,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -357,7 +357,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -468,7 +468,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();

@@ -77,7 +77,7 @@ public class PaymentServiceTest {
             Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
             Long userId = PaymentTestFixture.ValidPayment.USER_ID;
             Long totalAmount = PaymentTestFixture.ValidPayment.AMOUNT;
-            Long usedPoint = PaymentTestFixture.ValidPayment.ZERO_POINT;
+            Long usedPoint = PaymentTestFixture.ValidPayment.FULL_POINT; // 포인트로 전액 결제
             LocalDateTime requestedAt = PaymentTestFixture.ValidPayment.REQUESTED_AT;
 
             Payment expectedPayment = Payment.of(orderId, userId, totalAmount, usedPoint, requestedAt);
@@ -103,8 +103,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime completedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);
@@ -129,8 +130,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
             LocalDateTime completedAt = LocalDateTime.of(2025, 12, 1, 10, 5, 0);
@@ -180,8 +182,9 @@ public class PaymentServiceTest {
             Payment expectedPayment = Payment.of(
                 PaymentTestFixture.ValidPayment.ORDER_ID,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
 
@@ -203,8 +206,9 @@ public class PaymentServiceTest {
             Payment expectedPayment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 PaymentTestFixture.ValidPayment.REQUESTED_AT
             );
 
@@ -438,8 +442,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
@@ -468,8 +473,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
@@ -498,8 +504,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
@@ -549,8 +556,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
@@ -580,8 +588,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
@@ -611,8 +620,9 @@ public class PaymentServiceTest {
             Payment payment = Payment.of(
                 orderId,
                 PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.CARD_TYPE,
+                PaymentTestFixture.ValidPayment.CARD_NO,
                 PaymentTestFixture.ValidPayment.AMOUNT,
-                PaymentTestFixture.ValidPayment.ZERO_POINT,
                 LocalDateTime.now()
             );
             
