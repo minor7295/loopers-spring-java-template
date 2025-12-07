@@ -82,6 +82,35 @@ public class PaymentService {
     }
 
     /**
+     * 포인트와 카드 혼합 결제를 생성합니다.
+     * <p>
+     * 포인트와 쿠폰 할인을 적용한 후 남은 금액을 카드로 결제하는 경우 사용합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param userId 사용자 ID
+     * @param totalAmount 총 결제 금액
+     * @param usedPoint 사용 포인트
+     * @param cardType 카드 타입 (paidAmount > 0일 때만 필수)
+     * @param cardNo 카드 번호 (paidAmount > 0일 때만 필수)
+     * @param requestedAt PG 요청 시각
+     * @return 생성된 Payment
+     */
+    @Transactional
+    public Payment create(
+        Long orderId,
+        Long userId,
+        Long totalAmount,
+        Long usedPoint,
+        CardType cardType,
+        String cardNo,
+        LocalDateTime requestedAt
+    ) {
+        Payment payment = Payment.of(orderId, userId, totalAmount, usedPoint, cardType, cardNo, requestedAt);
+        return paymentRepository.save(payment);
+    }
+
+    /**
      * 결제를 SUCCESS 상태로 전이합니다.
      * <p>
      * 멱등성 보장: 이미 SUCCESS 상태인 경우 아무 작업도 하지 않습니다.

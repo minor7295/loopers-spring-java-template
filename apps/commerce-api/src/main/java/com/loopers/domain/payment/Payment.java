@@ -126,6 +126,34 @@ public class Payment extends BaseEntity {
         Long usedPoint,
         LocalDateTime requestedAt
     ) {
+        return of(orderId, userId, totalAmount, usedPoint, null, null, requestedAt);
+    }
+
+    /**
+     * 포인트와 카드 혼합 결제용 Payment를 생성합니다.
+     * <p>
+     * 포인트와 쿠폰 할인을 적용한 후 남은 금액을 카드로 결제하는 경우 사용합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param userId 사용자 ID
+     * @param totalAmount 총 결제 금액
+     * @param usedPoint 사용 포인트
+     * @param cardType 카드 타입 (paidAmount > 0일 때만 필수)
+     * @param cardNo 카드 번호 (paidAmount > 0일 때만 필수)
+     * @param requestedAt PG 요청 시각
+     * @return 생성된 Payment 인스턴스
+     * @throws CoreException 유효성 검증 실패 시
+     */
+    public static Payment of(
+        Long orderId,
+        Long userId,
+        Long totalAmount,
+        Long usedPoint,
+        CardType cardType,
+        String cardNo,
+        LocalDateTime requestedAt
+    ) {
         validateOrderId(orderId);
         validateUserId(userId);
         validateAmount(totalAmount);
@@ -135,6 +163,14 @@ public class Payment extends BaseEntity {
         Long paidAmount = totalAmount - usedPoint;
         validatePaidAmount(paidAmount);
 
+        // paidAmount > 0이면 카드 정보 필수
+        if (paidAmount > 0) {
+            if (cardType == null || cardNo == null || cardNo.isBlank()) {
+                throw new CoreException(ErrorType.BAD_REQUEST,
+                    "포인트와 쿠폰만으로 결제할 수 없습니다. 카드 정보를 입력해주세요.");
+            }
+        }
+
         Payment payment = new Payment();
         payment.orderId = orderId;
         payment.userId = userId;
@@ -142,8 +178,8 @@ public class Payment extends BaseEntity {
         payment.usedPoint = usedPoint;
         payment.paidAmount = paidAmount;
         payment.status = (paidAmount == 0L) ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
-        payment.cardType = null;
-        payment.cardNo = null;
+        payment.cardType = cardType;  // paidAmount > 0일 때만 설정
+        payment.cardNo = cardNo;      // paidAmount > 0일 때만 설정
         payment.pgRequestedAt = requestedAt;
 
         return payment;

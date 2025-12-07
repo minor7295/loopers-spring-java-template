@@ -35,10 +35,9 @@ public final class PurchasingV1Dto {
      * 결제 정보 요청 DTO.
      */
     public record PaymentRequest(
-        @NotNull(message = "카드 타입은 필수입니다.")
-        String cardType,
-        @NotNull(message = "카드 번호는 필수입니다.")
-        String cardNo
+        Long usedPoint,      // 포인트 사용량 (선택, 기본값: 0)
+        String cardType,     // 카드 타입 (paidAmount > 0일 때만 필수)
+        String cardNo        // 카드 번호 (paidAmount > 0일 때만 필수)
     ) {
     }
 

@@ -15,6 +15,7 @@ import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.domain.order.OrderPaymentResultService;
 import com.loopers.domain.order.OrderCancellationService;
 import com.loopers.domain.payment.PaymentService;
+import com.loopers.domain.payment.Payment;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.payment.CardType;
 import com.loopers.support.error.CoreException;
@@ -24,6 +25,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -52,15 +55,26 @@ public class PurchasingFacade {
     private final OrderCancellationService orderCancellationService;
     private final OrderPaymentResultService orderPaymentResultService;
     private final PaymentService paymentService;  // Payment 관련: PaymentService만 의존 (DIP 준수)
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * 주문을 생성한다.
      * <p>
      * 1. 사용자 조회 및 존재 여부 검증<br>
      * 2. 상품 재고 검증 및 차감<br>
-     * 3. 사용자 포인트 검증 및 차감<br>
-     * 4. 주문 저장<br>
-     * 5. PG 결제 요청 (비동기)
+     * 3. 쿠폰 할인 적용<br>
+     * 4. 사용자 포인트 차감 (지정된 금액만)<br>
+     * 5. 주문 저장<br>
+     * 6. Payment 생성 (포인트+쿠폰 혼합 지원)<br>
+     * 7. PG 결제 금액이 0이면 바로 완료, 아니면 PG 결제 요청 (비동기)
+     * </p>
+     * <p>
+     * <b>결제 방식:</b>
+     * <ul>
+     *   <li><b>포인트+쿠폰 전액 결제:</b> paidAmount == 0이면 PG 요청 없이 바로 완료</li>
+     *   <li><b>혼합 결제:</b> 포인트 일부 사용 + PG 결제 나머지 금액</li>
+     *   <li><b>카드만 결제:</b> 포인트 사용 없이 카드로 전체 금액 결제</li>
+     * </ul>
      * </p>
      * <p>
      * <b>동시성 제어 전략:</b>
@@ -92,12 +106,13 @@ public class PurchasingFacade {
      *
      * @param userId 사용자 식별자 (로그인 ID)
      * @param commands 주문 상품 정보
-     * @param cardType 카드 타입 (SAMSUNG, KB, HYUNDAI)
-     * @param cardNo 카드 번호 (xxxx-xxxx-xxxx-xxxx 형식)
+     * @param usedPoint 포인트 사용량 (선택, 기본값: 0)
+     * @param cardType 카드 타입 (paidAmount > 0일 때만 필수)
+     * @param cardNo 카드 번호 (paidAmount > 0일 때만 필수)
      * @return 생성된 주문 정보
      */
     @Transactional
-    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands, String cardType, String cardNo) {
+    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands, Long usedPoint, String cardType, String cardNo) {
         if (userId == null || userId.isBlank()) {
             throw new CoreException(ErrorType.BAD_REQUEST, "사용자 ID는 필수입니다.");
         }
@@ -159,41 +174,84 @@ public class PurchasingFacade {
             discountAmount = couponService.applyCoupon(user.getId(), couponCode, calculateSubtotal(orderItems));
         }
 
+        // 주문 총액 계산 (쿠폰 할인 적용)
+        Integer orderTotalAmount = calculateSubtotal(orderItems) - discountAmount;
+
+        // 포인트 차감 (지정된 금액만)
+        Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
+        
+        // 포인트 잔액 검증: 포인트를 사용하는 경우에만 검증
+        // 재고 차감 전에 검증하여 원자성 보장 (검증 실패 시 아무것도 변경되지 않음)
+        if (usedPointAmount > 0) {
+            Long userPointBalance = user.getPoint().getValue();
+            if (userPointBalance < usedPointAmount) {
+                throw new CoreException(ErrorType.BAD_REQUEST,
+                    String.format("포인트가 부족합니다. (현재 잔액: %d, 사용 요청 금액: %d)", userPointBalance, usedPointAmount));
+            }
+        }
+
         // OrderService를 사용하여 주문 생성
         Order savedOrder = orderService.create(user.getId(), orderItems, couponCode, discountAmount);
         // 주문은 PENDING 상태로 생성됨 (Order 생성자에서 기본값으로 설정)
         // 결제 성공 후에만 COMPLETED로 변경됨
 
+        // 재고 차감
         decreaseStocksForOrderItems(savedOrder.getItems(), products);
-        deductUserPoint(user, savedOrder.getTotalAmount());
-        // 주문은 PENDING 상태로 유지 (결제 요청 중 상태)
-        // 결제 성공 시 콜백이나 상태 확인 API를 통해 COMPLETED로 변경됨
+
+        // 포인트 차감 (지정된 금액만)
+        if (usedPointAmount > 0) {
+            deductUserPoint(user, usedPointAmount.intValue());
+        }
+
+        // PG 결제 금액 계산
+        // Order.getTotalAmount()는 이미 쿠폰 할인이 적용된 금액이므로 discountAmount를 다시 빼면 안 됨
+        Long totalAmount = savedOrder.getTotalAmount().longValue();
+        Long paidAmount = totalAmount - usedPointAmount;
+
+        // Payment 생성 (포인트+쿠폰 혼합 지원)
+        CardType cardTypeEnum = (cardType != null && !cardType.isBlank()) ? convertCardType(cardType) : null;
+        Payment payment = paymentService.create(
+            savedOrder.getId(),
+            user.getId(),
+            totalAmount,
+            usedPointAmount,
+            cardTypeEnum,
+            cardNo,
+            java.time.LocalDateTime.now()
+        );
+
+        // 포인트+쿠폰으로 전액 결제 완료된 경우
+        if (paidAmount == 0) {
+            // PG 요청 없이 바로 완료
+            orderService.completeOrder(savedOrder.getId());
+            paymentService.toSuccess(payment.getId(), java.time.LocalDateTime.now());
+            productService.saveAll(products);
+            userService.save(user);
+            log.info("포인트+쿠폰으로 전액 결제 완료. (orderId: {})", savedOrder.getId());
+            return OrderInfo.from(savedOrder);
+        }
+
+        // PG 결제가 필요한 경우
+        if (cardType == null || cardType.isBlank() || cardNo == null || cardNo.isBlank()) {
+            throw new CoreException(ErrorType.BAD_REQUEST,
+                "포인트와 쿠폰만으로 결제할 수 없습니다. 카드 정보를 입력해주세요.");
+        }
 
         productService.saveAll(products);
         userService.save(user);
-        // 주문은 PENDING 상태로 저장됨
-
-        // Payment 생성 (PaymentService 사용)
-        paymentService.create(
-            savedOrder.getId(),
-            user.getId(),
-            convertCardType(cardType),
-            cardNo,
-            savedOrder.getTotalAmount().longValue(),
-            java.time.LocalDateTime.now()
-        );
 
         // PG 결제 요청을 트랜잭션 커밋 후에 실행하여 DB 커넥션 풀 고갈 방지
         // 트랜잭션 내에서 외부 HTTP 호출을 하면 PG 지연/타임아웃 시 DB 커넥션이 오래 유지되어 커넥션 풀 고갈 위험
         Long orderId = savedOrder.getId();
-        Integer totalAmount = savedOrder.getTotalAmount();
         TransactionSynchronizationManager.registerSynchronization(
             new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
                     // 트랜잭션 커밋 후 PG 호출 (DB 커넥션 해제 후 실행)
                     try {
-                        String transactionKey = requestPaymentToGateway(userId, user.getId(), orderId, cardType, cardNo, totalAmount);
+                        String transactionKey = requestPaymentToGateway(
+                            userId, user.getId(), orderId, cardType, cardNo, paidAmount.intValue()
+                        );
                         if (transactionKey != null) {
                             // 결제 성공: 별도 트랜잭션에서 주문 상태를 COMPLETED로 변경
                             updateOrderStatusToCompleted(orderId, transactionKey);
@@ -437,6 +495,13 @@ public class PurchasingFacade {
                 // PaymentService 내부에서 이미 실패 분류가 완료되었으므로, 여기서는 처리만 수행
                 // 비즈니스 실패는 PaymentService에서 이미 처리되었으므로, 여기서는 타임아웃/외부 시스템 장애만 처리
                 
+                // Circuit Breaker OPEN은 외부 시스템 장애이므로 주문을 취소하지 않음
+                if ("CIRCUIT_BREAKER_OPEN".equals(failure.errorCode())) {
+                    // 외부 시스템 장애: 주문은 PENDING 상태로 유지
+                    log.info("Circuit Breaker OPEN 상태. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                    return null;
+                }
+                
                 if (failure.isTimeout()) {
                     // 타임아웃: 상태 확인 후 복구
                     log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
@@ -673,9 +738,9 @@ public class PurchasingFacade {
      * <p>
      * <b>트랜잭션 전략:</b>
      * <ul>
-     *   <li>REQUIRES_NEW: 별도 트랜잭션으로 실행하여 외부 시스템 호출과 독립적으로 처리</li>
+     *   <li>TransactionTemplate 사용: afterCommit 콜백에서 호출되므로 명시적으로 새 트랜잭션 생성</li>
      *   <li>결제 실패 처리 중 오류가 발생해도 기존 주문 생성 트랜잭션에 영향을 주지 않음</li>
-     *   <li>Self-invocation 문제 해결: 별도 메서드로 분리하여 Spring AOP 프록시가 정상적으로 적용되도록 함</li>
+     *   <li>Self-invocation 문제 해결: TransactionTemplate을 사용하여 명시적으로 트랜잭션 관리</li>
      * </ul>
      * </p>
      * <p>
@@ -691,44 +756,52 @@ public class PurchasingFacade {
      * @param errorCode 오류 코드
      * @param errorMessage 오류 메시지
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     private void handlePaymentFailure(String userId, Long orderId, String errorCode, String errorMessage) {
-        try {
-            // 사용자 조회 (Service를 통한 접근)
-            User user;
+        // TransactionTemplate을 사용하여 명시적으로 새 트랜잭션 생성
+        // afterCommit 콜백에서 호출되므로 @Transactional 어노테이션이 작동하지 않음
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
+        
+        transactionTemplate.executeWithoutResult(status -> {
             try {
-                user = userService.findByUserId(userId);
-            } catch (CoreException e) {
-                log.warn("결제 실패 처리 시 사용자를 찾을 수 없습니다. (userId: {}, orderId: {})", userId, orderId);
-                return;
+                // 사용자 조회 (Service를 통한 접근)
+                User user;
+                try {
+                    user = userService.findByUserId(userId);
+                } catch (CoreException e) {
+                    log.warn("결제 실패 처리 시 사용자를 찾을 수 없습니다. (userId: {}, orderId: {})", userId, orderId);
+                    return;
+                }
+
+                // 주문 조회 (Service를 통한 접근)
+                Order order;
+                try {
+                    order = orderService.getById(orderId);
+                } catch (CoreException e) {
+                    log.warn("결제 실패 처리 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                    return;
+                }
+
+                // 이미 취소된 주문인 경우 처리하지 않음
+                if (order.getStatus() == OrderStatus.CANCELED) {
+                    log.info("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
+                    return;
+                }
+
+                // 주문 취소 및 리소스 원복
+                orderCancellationService.cancel(order, user);
+
+                log.info("결제 실패로 인한 주문 취소 완료. (orderId: {}, errorCode: {}, errorMessage: {})",
+                    orderId, errorCode, errorMessage);
+            } catch (Exception e) {
+                // 결제 실패 처리 중 오류 발생 시에도 로그만 기록
+                // 이미 주문은 생성되어 있으므로, 나중에 수동으로 처리할 수 있도록 로그 기록
+                log.error("결제 실패 처리 중 오류 발생. (orderId: {}, errorCode: {})",
+                    orderId, errorCode, e);
+                // 예외를 다시 던져서 트랜잭션이 롤백되도록 함
+                throw new RuntimeException("결제 실패 처리 중 오류 발생", e);
             }
-
-            // 주문 조회 (Service를 통한 접근)
-            Order order;
-            try {
-                order = orderService.getById(orderId);
-            } catch (CoreException e) {
-                log.warn("결제 실패 처리 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
-                return;
-            }
-
-            // 이미 취소된 주문인 경우 처리하지 않음
-            if (order.getStatus() == OrderStatus.CANCELED) {
-                log.info("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
-                return;
-            }
-
-            // 주문 취소 및 리소스 원복
-            orderCancellationService.cancel(order, user);
-
-            log.info("결제 실패로 인한 주문 취소 완료. (orderId: {}, errorCode: {}, errorMessage: {})",
-                orderId, errorCode, errorMessage);
-        } catch (Exception e) {
-            // 결제 실패 처리 중 오류 발생 시에도 로그만 기록
-            // 이미 주문은 생성되어 있으므로, 나중에 수동으로 처리할 수 있도록 로그 기록
-            log.error("결제 실패 처리 중 오류 발생. (orderId: {}, errorCode: {})",
-                orderId, errorCode, e);
-        }
+        });
     }
 
 }

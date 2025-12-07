@@ -1,5 +1,7 @@
 package com.loopers.domain.order;
 
+import com.loopers.domain.payment.Payment;
+import com.loopers.domain.payment.PaymentService;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Point;
@@ -33,6 +35,7 @@ public class OrderCancellationService {
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final PaymentService paymentService;
     
     /**
      * 주문을 취소하고 포인트를 환불하며 재고를 원복합니다.
@@ -82,7 +85,15 @@ public class OrderCancellationService {
         
         order.cancel();
         increaseStocksForOrderItems(order.getItems(), products);
-        lockedUser.receivePoint(Point.of((long) order.getTotalAmount()));
+        
+        // 실제로 사용된 포인트만 환불 (Payment에서 확인)
+        Long refundPointAmount = paymentService.findByOrderId(order.getId())
+            .map(Payment::getUsedPoint)
+            .orElse(0L);
+        
+        if (refundPointAmount > 0) {
+            lockedUser.receivePoint(Point.of(refundPointAmount));
+        }
         
         products.forEach(productRepository::save);
         userRepository.save(lockedUser);

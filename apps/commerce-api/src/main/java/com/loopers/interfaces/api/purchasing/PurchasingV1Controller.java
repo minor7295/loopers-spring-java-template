@@ -41,6 +41,7 @@ public class PurchasingV1Controller {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             userId,
             request.toCommands(),
+            request.payment().usedPoint(),
             request.payment().cardType(),
             request.payment().cardNo()
         );
