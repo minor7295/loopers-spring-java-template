@@ -2,6 +2,7 @@ package com.loopers.domain.payment;
 
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -27,9 +29,21 @@ public class PaymentServiceTest {
 
     @Mock
     private PaymentRepository paymentRepository;
+    
+    @Mock
+    private PaymentGateway paymentGateway;
+    
+    @Mock
+    private PaymentFailureClassifier paymentFailureClassifier;
 
     @InjectMocks
     private PaymentService paymentService;
+    
+    @BeforeEach
+    void setUp() {
+        // @Value 어노테이션 필드 설정
+        ReflectionTestUtils.setField(paymentService, "callbackBaseUrl", "http://localhost:8080");
+    }
 
     @DisplayName("결제 생성")
     @Nested
@@ -221,6 +235,419 @@ public class PaymentServiceTest {
             // assert
             assertThat(result.getErrorType()).isEqualTo(ErrorType.NOT_FOUND);
             verify(paymentRepository, times(1)).findById(paymentId);
+        }
+    }
+    
+    @DisplayName("PG 결제 요청")
+    @Nested
+    class RequestPayment {
+        @DisplayName("PG 결제 요청을 성공적으로 처리할 수 있다.")
+        @Test
+        void requestsPaymentSuccessfully() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String userId = "user123";  // User.userId (String)
+            Long userEntityId = PaymentTestFixture.ValidPayment.USER_ID;  // User.id (Long)
+            String cardType = "SAMSUNG";
+            String cardNo = PaymentTestFixture.ValidPayment.CARD_NO;
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
+            
+            Payment payment = Payment.of(
+                orderId,
+                userEntityId,
+                CardType.SAMSUNG,
+                cardNo,
+                amount,
+                LocalDateTime.now()
+            );
+            
+            PaymentRequestResult.Success successResult = new PaymentRequestResult.Success("TXN123456");
+            
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(successResult);
+            
+            // act
+            PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
+            
+            // assert
+            assertThat(result).isInstanceOf(PaymentRequestResult.Success.class);
+            assertThat(((PaymentRequestResult.Success) result).transactionKey()).isEqualTo("TXN123456");
+            verify(paymentRepository, times(1)).save(any(Payment.class));
+            verify(paymentGateway, times(1)).requestPayment(any(PaymentRequestCommand.class));
+        }
+        
+        @DisplayName("비즈니스 실패 시 결제 상태를 FAILED로 변경한다.")
+        @Test
+        void updatesPaymentToFailed_whenBusinessFailure() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String userId = "user123";  // User.userId (String)
+            Long userEntityId = PaymentTestFixture.ValidPayment.USER_ID;  // User.id (Long)
+            String cardType = "SAMSUNG";
+            String cardNo = PaymentTestFixture.ValidPayment.CARD_NO;
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
+            
+            Payment payment = Payment.of(
+                orderId,
+                userEntityId,
+                CardType.SAMSUNG,
+                cardNo,
+                amount,
+                LocalDateTime.now()
+            );
+            
+            PaymentRequestResult.Failure failureResult = new PaymentRequestResult.Failure(
+                "LIMIT_EXCEEDED",
+                "카드 한도 초과",
+                false,
+                false
+            );
+            
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
+            when(paymentFailureClassifier.classify("LIMIT_EXCEEDED")).thenReturn(PaymentFailureType.BUSINESS_FAILURE);
+            when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
+            
+            // act
+            PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
+            
+            // assert
+            assertThat(result).isInstanceOf(PaymentRequestResult.Failure.class);
+            verify(paymentRepository, times(2)).save(any(Payment.class)); // 생성 + 실패 상태 변경
+            verify(paymentFailureClassifier, times(1)).classify("LIMIT_EXCEEDED");
+        }
+        
+        @DisplayName("외부 시스템 장애 시 결제 상태를 PENDING으로 유지한다.")
+        @Test
+        void maintainsPendingStatus_whenExternalSystemFailure() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String userId = "user123";  // User.userId (String)
+            Long userEntityId = PaymentTestFixture.ValidPayment.USER_ID;  // User.id (Long)
+            String cardType = "SAMSUNG";
+            String cardNo = PaymentTestFixture.ValidPayment.CARD_NO;
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
+            
+            Payment payment = Payment.of(
+                orderId,
+                userEntityId,
+                CardType.SAMSUNG,
+                cardNo,
+                amount,
+                LocalDateTime.now()
+            );
+            
+            PaymentRequestResult.Failure failureResult = new PaymentRequestResult.Failure(
+                "CIRCUIT_BREAKER_OPEN",
+                "결제 대기 상태",
+                false,
+                false
+            );
+            
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
+            when(paymentFailureClassifier.classify("CIRCUIT_BREAKER_OPEN")).thenReturn(PaymentFailureType.EXTERNAL_SYSTEM_FAILURE);
+            
+            // act
+            PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
+            
+            // assert
+            assertThat(result).isInstanceOf(PaymentRequestResult.Failure.class);
+            verify(paymentRepository, times(1)).save(any(Payment.class)); // 생성만
+            verify(paymentFailureClassifier, times(1)).classify("CIRCUIT_BREAKER_OPEN");
+            verify(paymentRepository, never()).findById(anyLong()); // 상태 변경 없음
+        }
+        
+        @DisplayName("잘못된 카드 번호로 인해 예외가 발생한다.")
+        @Test
+        void throwsException_whenInvalidCardNo() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String userId = "user123";  // User.userId (String)
+            Long userEntityId = PaymentTestFixture.ValidPayment.USER_ID;  // User.id (Long)
+            String cardType = "SAMSUNG";
+            String invalidCardNo = "1234"; // 잘못된 카드 번호
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
+            
+            // act & assert
+            CoreException result = assertThrows(CoreException.class, () -> {
+                paymentService.requestPayment(orderId, userId, userEntityId, cardType, invalidCardNo, amount);
+            });
+            
+            assertThat(result.getErrorType()).isEqualTo(ErrorType.BAD_REQUEST);
+            verify(paymentRepository, never()).save(any(Payment.class));
+            verify(paymentGateway, never()).requestPayment(any(PaymentRequestCommand.class));
+        }
+        
+        @DisplayName("잘못된 카드 타입으로 인해 예외가 발생한다.")
+        @Test
+        void throwsException_whenInvalidCardType() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String userId = "user123";  // User.userId (String)
+            Long userEntityId = PaymentTestFixture.ValidPayment.USER_ID;  // User.id (Long)
+            String invalidCardType = "INVALID";
+            String cardNo = PaymentTestFixture.ValidPayment.CARD_NO;
+            Long amount = PaymentTestFixture.ValidPayment.AMOUNT;
+            
+            // act & assert
+            CoreException result = assertThrows(CoreException.class, () -> {
+                paymentService.requestPayment(orderId, userId, userEntityId, invalidCardType, cardNo, amount);
+            });
+            
+            assertThat(result.getErrorType()).isEqualTo(ErrorType.BAD_REQUEST);
+            verify(paymentRepository, never()).save(any(Payment.class));
+            verify(paymentGateway, never()).requestPayment(any(PaymentRequestCommand.class));
+        }
+    }
+    
+    @DisplayName("결제 상태 조회")
+    @Nested
+    class GetPaymentStatus {
+        @DisplayName("결제 상태를 조회할 수 있다.")
+        @Test
+        void getsPaymentStatus() {
+            // arrange
+            String userId = "user123";
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            PaymentStatus expectedStatus = PaymentStatus.SUCCESS;
+            
+            when(paymentGateway.getPaymentStatus(userId, orderId)).thenReturn(expectedStatus);
+            
+            // act
+            PaymentStatus result = paymentService.getPaymentStatus(userId, orderId);
+            
+            // assert
+            assertThat(result).isEqualTo(expectedStatus);
+            verify(paymentGateway, times(1)).getPaymentStatus(userId, orderId);
+        }
+    }
+    
+    @DisplayName("콜백 처리")
+    @Nested
+    class HandleCallback {
+        @DisplayName("SUCCESS 콜백을 처리할 수 있다.")
+        @Test
+        void handlesSuccessCallback() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String transactionKey = "TXN123456";
+            PaymentStatus status = PaymentStatus.SUCCESS;
+            String reason = null;
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            
+            // act
+            paymentService.handleCallback(orderId, transactionKey, status, reason);
+            
+            // assert
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, times(1)).findById(anyLong());
+            verify(paymentRepository, times(1)).save(any(Payment.class));
+        }
+        
+        @DisplayName("FAILED 콜백을 처리할 수 있다.")
+        @Test
+        void handlesFailedCallback() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String transactionKey = "TXN123456";
+            PaymentStatus status = PaymentStatus.FAILED;
+            String reason = "카드 한도 초과";
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            
+            // act
+            paymentService.handleCallback(orderId, transactionKey, status, reason);
+            
+            // assert
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, times(1)).findById(anyLong());
+            verify(paymentRepository, times(1)).save(any(Payment.class));
+        }
+        
+        @DisplayName("PENDING 콜백은 상태를 유지한다.")
+        @Test
+        void maintainsStatus_whenPendingCallback() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String transactionKey = "TXN123456";
+            PaymentStatus status = PaymentStatus.PENDING;
+            String reason = null;
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            
+            // act
+            paymentService.handleCallback(orderId, transactionKey, status, reason);
+            
+            // assert
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, never()).findById(anyLong());
+            verify(paymentRepository, never()).save(any(Payment.class));
+        }
+        
+        @DisplayName("결제를 찾을 수 없으면 로그만 기록한다.")
+        @Test
+        void logsWarning_whenPaymentNotFound() {
+            // arrange
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            String transactionKey = "TXN123456";
+            PaymentStatus status = PaymentStatus.SUCCESS;
+            String reason = null;
+            
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.empty());
+            
+            // act
+            paymentService.handleCallback(orderId, transactionKey, status, reason);
+            
+            // assert
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, never()).findById(anyLong());
+            verify(paymentRepository, never()).save(any(Payment.class));
+        }
+    }
+    
+    @DisplayName("타임아웃 복구")
+    @Nested
+    class RecoverAfterTimeout {
+        @DisplayName("SUCCESS 상태로 복구할 수 있다.")
+        @Test
+        void recoversToSuccess() {
+            // arrange
+            String userId = "user123";
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            PaymentStatus status = PaymentStatus.SUCCESS;
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentGateway.getPaymentStatus(userId, orderId)).thenReturn(status);
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            
+            // act
+            paymentService.recoverAfterTimeout(userId, orderId);
+            
+            // assert
+            verify(paymentGateway, times(1)).getPaymentStatus(userId, orderId);
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, times(1)).findById(anyLong());
+            verify(paymentRepository, times(1)).save(any(Payment.class));
+        }
+        
+        @DisplayName("FAILED 상태로 복구할 수 있다.")
+        @Test
+        void recoversToFailed() {
+            // arrange
+            String userId = "user123";
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            PaymentStatus status = PaymentStatus.FAILED;
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentGateway.getPaymentStatus(userId, orderId)).thenReturn(status);
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
+            when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
+            
+            // act
+            paymentService.recoverAfterTimeout(userId, orderId);
+            
+            // assert
+            verify(paymentGateway, times(1)).getPaymentStatus(userId, orderId);
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, times(1)).findById(anyLong());
+            verify(paymentRepository, times(1)).save(any(Payment.class));
+        }
+        
+        @DisplayName("PENDING 상태는 유지한다.")
+        @Test
+        void maintainsPendingStatus() {
+            // arrange
+            String userId = "user123";
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            PaymentStatus status = PaymentStatus.PENDING;
+            
+            Payment payment = Payment.of(
+                orderId,
+                PaymentTestFixture.ValidPayment.USER_ID,
+                PaymentTestFixture.ValidPayment.AMOUNT,
+                PaymentTestFixture.ValidPayment.ZERO_POINT,
+                LocalDateTime.now()
+            );
+            
+            when(paymentGateway.getPaymentStatus(userId, orderId)).thenReturn(status);
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+            
+            // act
+            paymentService.recoverAfterTimeout(userId, orderId);
+            
+            // assert
+            verify(paymentGateway, times(1)).getPaymentStatus(userId, orderId);
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, never()).findById(anyLong());
+            verify(paymentRepository, never()).save(any(Payment.class));
+        }
+        
+        @DisplayName("결제를 찾을 수 없으면 로그만 기록한다.")
+        @Test
+        void logsWarning_whenPaymentNotFound() {
+            // arrange
+            String userId = "user123";
+            Long orderId = PaymentTestFixture.ValidPayment.ORDER_ID;
+            PaymentStatus status = PaymentStatus.SUCCESS;
+            
+            when(paymentGateway.getPaymentStatus(userId, orderId)).thenReturn(status);
+            when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.empty());
+            
+            // act
+            paymentService.recoverAfterTimeout(userId, orderId);
+            
+            // assert
+            verify(paymentGateway, times(1)).getPaymentStatus(userId, orderId);
+            verify(paymentRepository, times(1)).findByOrderId(orderId);
+            verify(paymentRepository, never()).findById(anyLong());
+            verify(paymentRepository, never()).save(any(Payment.class));
         }
     }
 }

@@ -14,7 +14,7 @@ public class PaymentTestFixture {
         public static final Long USER_ID = 100L;
         public static final Long AMOUNT = 50000L;
         public static final CardType CARD_TYPE = CardType.SAMSUNG;
-        public static final String CARD_NO = "1234-5678-9012-3456";
+        public static final String CARD_NO = "4111-1111-1111-1111";
         public static final LocalDateTime REQUESTED_AT = LocalDateTime.of(2025, 12, 1, 10, 0, 0);
         public static final String TRANSACTION_KEY = "tx-key-12345";
         public static final Long ZERO_POINT = 0L;
