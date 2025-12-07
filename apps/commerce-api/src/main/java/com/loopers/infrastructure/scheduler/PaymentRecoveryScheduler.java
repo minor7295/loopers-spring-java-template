@@ -1,5 +1,6 @@
-package com.loopers.application.purchasing;
+package com.loopers.infrastructure.scheduler;
 
+import com.loopers.application.purchasing.PurchasingFacade;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.order.OrderStatus;
@@ -33,6 +34,13 @@ import java.util.List;
  *   <li><b>Eventually Consistent:</b> 약간의 지연 허용 가능</li>
  *   <li><b>안전한 처리:</b> 각 주문별로 독립적으로 처리하여 실패 시에도 다른 주문에 영향 없음</li>
  *   <li><b>성능 고려:</b> 배치로 처리하여 PG 시스템 부하 최소화</li>
+ * </ul>
+ * </p>
+ * <p>
+ * <b>레이어 위치 근거:</b>
+ * <ul>
+ *   <li>스케줄링은 기술적 관심사이므로 Infrastructure Layer에 위치</li>
+ *   <li>비즈니스 로직은 Application Layer의 PurchasingFacade에 위임</li>
  * </ul>
  * </p>
  *
