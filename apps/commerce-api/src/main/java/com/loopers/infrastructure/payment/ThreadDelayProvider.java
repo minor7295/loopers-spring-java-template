@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import org.springframework.stereotype.Component;
 
@@ -18,4 +18,3 @@ public class ThreadDelayProvider implements DelayProvider {
         Thread.sleep(duration.toMillis());
     }
 }
-

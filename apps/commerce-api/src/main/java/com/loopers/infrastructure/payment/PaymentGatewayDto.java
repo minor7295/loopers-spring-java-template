@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -103,4 +103,3 @@ public class PaymentGatewayDto {
         }
     }
 }
-

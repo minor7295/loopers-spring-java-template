@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import com.loopers.domain.payment.PaymentGateway;
 import com.loopers.application.purchasing.PaymentRequestCommand;
@@ -147,4 +147,3 @@ public class PaymentGatewayImpl implements PaymentGateway {
     }
     
 }
-

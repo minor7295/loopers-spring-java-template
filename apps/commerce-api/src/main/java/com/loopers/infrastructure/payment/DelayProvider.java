@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import java.time.Duration;
 
@@ -21,4 +21,3 @@ public interface DelayProvider {
      */
     void delay(Duration duration) throws InterruptedException;
 }
-

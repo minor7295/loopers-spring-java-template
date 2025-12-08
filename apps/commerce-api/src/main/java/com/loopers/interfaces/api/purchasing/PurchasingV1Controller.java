@@ -2,7 +2,7 @@ package com.loopers.interfaces.api.purchasing;
 
 import com.loopers.application.purchasing.OrderInfo;
 import com.loopers.application.purchasing.PurchasingFacade;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
 import com.loopers.interfaces.api.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

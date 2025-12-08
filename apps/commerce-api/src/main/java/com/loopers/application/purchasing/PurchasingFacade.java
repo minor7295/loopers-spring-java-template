@@ -10,7 +10,7 @@ import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserService;
 import com.loopers.domain.coupon.CouponService;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
 import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.domain.payment.PaymentService;
 import com.loopers.domain.payment.Payment;
