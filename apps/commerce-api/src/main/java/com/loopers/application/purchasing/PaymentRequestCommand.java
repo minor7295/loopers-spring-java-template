@@ -1,4 +1,4 @@
-package com.loopers.domain.payment;
+package com.loopers.application.purchasing;
 
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -6,7 +6,7 @@ import com.loopers.support.error.ErrorType;
 /**
  * 결제 요청 명령.
  * <p>
- * PG 결제 요청에 필요한 정보를 담는 도메인 모델입니다.
+ * PG 결제 요청에 필요한 정보를 담는 명령 모델입니다.
  * </p>
  *
  * @author Loopers
@@ -41,4 +41,3 @@ public record PaymentRequestCommand(
         }
     }
 }
-
