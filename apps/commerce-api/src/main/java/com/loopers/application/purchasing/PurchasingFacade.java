@@ -236,6 +236,7 @@ public class PurchasingFacade {
         // PG 결제 요청을 트랜잭션 커밋 후에 실행하여 DB 커넥션 풀 고갈 방지
         // 트랜잭션 내에서 외부 HTTP 호출을 하면 PG 지연/타임아웃 시 DB 커넥션이 오래 유지되어 커넥션 풀 고갈 위험
         Long orderId = savedOrder.getId();
+
         TransactionSynchronizationManager.registerSynchronization(
             new TransactionSynchronization() {
                 @Override
@@ -274,6 +275,15 @@ public class PurchasingFacade {
      *   <li><b>비관적 락 사용:</b> 재고 원복 시 동시성 제어를 위해 findByIdForUpdate 사용</li>
      *   <li><b>Deadlock 방지:</b> 상품 ID를 정렬하여 일관된 락 획득 순서 보장</li>
      * </ul>
+     * </p>
+     *
+     * @param order 주문 엔티티
+     * @param user 사용자 엔티티
+     */
+    /**
+     * 주문을 취소하고 포인트를 환불하며 재고를 원복한다.
+     * <p>
+     * OrderCancellationService를 사용하여 처리합니다.
      * </p>
      *
      * @param order 주문 엔티티
@@ -890,6 +900,5 @@ public class PurchasingFacade {
             }
         });
     }
-
 }
 
