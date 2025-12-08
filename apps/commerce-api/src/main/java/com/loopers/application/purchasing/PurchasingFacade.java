@@ -12,8 +12,6 @@ import com.loopers.domain.user.UserService;
 import com.loopers.domain.coupon.CouponService;
 import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
 import com.loopers.domain.payment.PaymentRequestResult;
-import com.loopers.domain.order.OrderPaymentResultService;
-import com.loopers.domain.order.OrderCancellationService;
 import com.loopers.domain.payment.PaymentService;
 import com.loopers.domain.payment.Payment;
 import com.loopers.domain.payment.PaymentStatus;
@@ -52,8 +50,6 @@ public class PurchasingFacade {
     private final ProductService productService;
     private final CouponService couponService;
     private final OrderService orderService;
-    private final OrderCancellationService orderCancellationService;
-    private final OrderPaymentResultService orderPaymentResultService;
     private final PaymentService paymentService;  // Payment 관련: PaymentService만 의존 (DIP 준수)
     private final PlatformTransactionManager transactionManager;
 
@@ -174,9 +170,6 @@ public class PurchasingFacade {
             discountAmount = couponService.applyCoupon(user.getId(), couponCode, calculateSubtotal(orderItems));
         }
 
-        // 주문 총액 계산 (쿠폰 할인 적용)
-        Integer orderTotalAmount = calculateSubtotal(orderItems) - discountAmount;
-
         // 포인트 차감 (지정된 금액만)
         Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
         
@@ -287,18 +280,48 @@ public class PurchasingFacade {
      * @param order 주문 엔티티
      * @param user 사용자 엔티티
      */
-    /**
-     * 주문을 취소하고 포인트를 환불하며 재고를 원복한다.
-     * <p>
-     * OrderCancellationService를 사용하여 처리합니다.
-     * </p>
-     *
-     * @param order 주문 엔티티
-     * @param user 사용자 엔티티
-     */
     @Transactional
     public void cancelOrder(Order order, User user) {
-        orderCancellationService.cancel(order, user);
+        if (order == null || user == null) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "취소할 주문과 사용자 정보는 필수입니다.");
+        }
+
+        // ✅ Deadlock 방지: User 락을 먼저 획득하여 createOrder와 동일한 락 획득 순서 보장
+        User lockedUser = userService.findByUserIdForUpdate(user.getUserId());
+        if (lockedUser == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+
+        // ✅ Deadlock 방지: 상품 ID를 정렬하여 일관된 락 획득 순서 보장
+        List<Long> sortedProductIds = order.getItems().stream()
+            .map(OrderItem::getProductId)
+            .distinct()
+            .sorted()
+            .toList();
+
+        // 정렬된 순서대로 상품 락 획득 (Deadlock 방지)
+        Map<Long, Product> productMap = new java.util.HashMap<>();
+        for (Long productId : sortedProductIds) {
+            Product product = productService.findByIdForUpdate(productId);
+            productMap.put(productId, product);
+        }
+
+        // OrderItem 순서대로 Product 리스트 생성
+        List<Product> products = order.getItems().stream()
+            .map(item -> productMap.get(item.getProductId()))
+            .toList();
+
+        // 실제로 사용된 포인트만 환불 (Payment에서 확인)
+        Long refundPointAmount = paymentService.findByOrderId(order.getId())
+            .map(Payment::getUsedPoint)
+            .orElse(0L);
+
+        // 도메인 서비스를 통한 주문 취소 처리
+        orderService.cancelOrder(order, products, lockedUser, refundPointAmount);
+
+        // 저장
+        productService.saveAll(products);
+        userService.save(lockedUser);
     }
 
     /**
@@ -429,6 +452,74 @@ public class PurchasingFacade {
             case FAILED -> PaymentGatewayDto.TransactionStatus.FAILED;
             case PENDING -> PaymentGatewayDto.TransactionStatus.PENDING;
         };
+    }
+
+    /**
+     * 결제 상태에 따라 주문 상태를 업데이트합니다.
+     * <p>
+     * 별도 트랜잭션으로 실행하여 외부 시스템 호출과 독립적으로 처리합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param paymentStatus 결제 상태 (도메인 모델)
+     * @param transactionKey 트랜잭션 키
+     * @param reason 실패 사유 (실패 시)
+     * @return 업데이트 성공 여부 (true: 성공, false: 실패)
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean updateOrderStatusByPaymentResult(
+        Long orderId,
+        PaymentStatus paymentStatus,
+        String transactionKey,
+        String reason
+    ) {
+        try {
+            Order order = orderService.findById(orderId).orElse(null);
+            
+            if (order == null) {
+                log.warn("주문 상태 업데이트 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                return false;
+            }
+            
+            // 이미 완료되거나 취소된 주문인 경우 처리하지 않음 (정상적인 경우이므로 true 반환)
+            if (order.getStatus() == OrderStatus.COMPLETED) {
+                log.info("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return true;
+            }
+            
+            if (order.getStatus() == OrderStatus.CANCELED) {
+                log.info("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return true;
+            }
+            
+            if (paymentStatus == PaymentStatus.SUCCESS) {
+                // 결제 성공: 주문 완료
+                orderService.updateStatusByPaymentResult(order, paymentStatus);
+                log.info("결제 상태 확인 결과, 주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+                return true;
+            } else if (paymentStatus == PaymentStatus.FAILED) {
+                // 결제 실패: 주문 취소 및 리소스 원복
+                User user = userService.findById(order.getUserId());
+                if (user == null) {
+                    log.warn("주문 상태 업데이트 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
+                        orderId, order.getUserId());
+                    return false;
+                }
+                cancelOrder(order, user);
+                log.info("결제 상태 확인 결과, 주문 상태를 CANCELED로 업데이트했습니다. (orderId: {}, transactionKey: {}, reason: {})",
+                    orderId, transactionKey, reason);
+                return true;
+            } else {
+                // PENDING 상태: 아직 처리 중 (정상적인 경우이므로 true 반환)
+                log.info("결제 상태 확인 결과, 아직 처리 중입니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+                return true;
+            }
+        } catch (Exception e) {
+            log.error("주문 상태 업데이트 중 오류 발생. (orderId: {})", orderId, e);
+            return false;
+        }
     }
 
     /**
@@ -594,8 +685,8 @@ public class PurchasingFacade {
                 callbackRequest.reason()
             );
             
-            // OrderPaymentResultService를 사용하여 주문 상태 업데이트
-            boolean updated = orderPaymentResultService.updateByPaymentStatus(
+            // 주문 상태 업데이트 처리
+            boolean updated = updateOrderStatusByPaymentResult(
                 orderId,
                 paymentStatus,
                 callbackRequest.transactionKey(),
@@ -708,8 +799,8 @@ public class PurchasingFacade {
             // 결제 상태 조회
             PaymentStatus paymentStatus = paymentService.getPaymentStatus(userId, orderId);
             
-            // OrderPaymentResultService를 사용하여 주문 상태 업데이트
-            boolean updated = orderPaymentResultService.updateByPaymentStatus(orderId, paymentStatus, null, null);
+            // 주문 상태 업데이트 처리
+            boolean updated = updateOrderStatusByPaymentResult(orderId, paymentStatus, null, null);
             
             if (!updated) {
                 log.warn("상태 복구 실패. 주문 상태 업데이트에 실패했습니다. (orderId: {})", orderId);
@@ -789,7 +880,7 @@ public class PurchasingFacade {
                 }
 
                 // 주문 취소 및 리소스 원복
-                orderCancellationService.cancel(order, user);
+                cancelOrder(order, user);
 
                 log.info("결제 실패로 인한 주문 취소 완료. (orderId: {}, errorCode: {}, errorMessage: {})",
                     orderId, errorCode, errorMessage);
