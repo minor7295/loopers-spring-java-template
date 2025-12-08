@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
@@ -274,4 +274,3 @@ class PaymentGatewayClientTest {
         assertThat(response.data().transactionKey()).isEqualTo(transactionKey);
     }
 }
-

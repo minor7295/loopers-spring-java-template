@@ -1,4 +1,4 @@
-package com.loopers.domain.order;
+package com.loopers.domain.payment;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

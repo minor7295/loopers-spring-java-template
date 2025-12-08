@@ -128,7 +128,8 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         OrderItemCommand.of(products.get(index).getId(), 1)
                     );
-                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+                    // 포인트를 사용하여 주문 (각 주문마다 10,000 포인트 사용)
+                    purchasingFacade.createOrder(userId, commands, 10_000L, "SAMSUNG", "4111-1111-1111-1111");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -176,11 +177,13 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         OrderItemCommand.of(productId, quantityPerOrder)
                     );
-                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+                    purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
                         exceptions.add(e);
+                        System.out.println("Exception in stock test: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                        e.printStackTrace();
                     }
                 } finally {
                     latch.countDown();
@@ -194,6 +197,7 @@ class PurchasingFacadeConcurrencyTest {
         Product savedProduct = productRepository.findById(productId).orElseThrow();
         int expectedStock = 100 - (successCount.get() * quantityPerOrder);
 
+        System.out.println("Success count: " + successCount.get() + ", Exceptions: " + exceptions.size());
         assertThat(savedProduct.getStock()).isEqualTo(expectedStock);
         assertThat(successCount.get() + exceptions.size()).isEqualTo(orderCount);
     }
@@ -228,7 +232,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> commands = List.of(
                         new OrderItemCommand(product.getId(), 1, couponCode)
                     );
-                    purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+                    purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -277,7 +281,7 @@ class PurchasingFacadeConcurrencyTest {
         List<OrderItemCommand> commands = List.of(
             OrderItemCommand.of(productId, orderQuantity)
         );
-        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, "SAMSUNG", "4111-1111-1111-1111");
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
         Long orderId = orderInfo.orderId();
         
         // 주문 취소 전 재고 확인 (100 - 5 = 95)
@@ -317,7 +321,7 @@ class PurchasingFacadeConcurrencyTest {
                     List<OrderItemCommand> otherCommands = List.of(
                         OrderItemCommand.of(productId, 3)
                     );
-                    purchasingFacade.createOrder(userId, otherCommands, "SAMSUNG", "4111-1111-1111-1111");
+                    purchasingFacade.createOrder(userId, otherCommands, null, "SAMSUNG", "4111-1111-1111-1111");
                     orderSuccess.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {

@@ -1,4 +1,4 @@
-package com.loopers.domain.order;
+package com.loopers.domain.payment;
 
 /**
  * 결제 실패 유형.

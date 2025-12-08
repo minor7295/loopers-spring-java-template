@@ -9,9 +9,9 @@ import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.UserTestFixture;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewaySchedulerClient;
+import com.loopers.infrastructure.payment.PaymentGatewayClient;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewaySchedulerClient;
 import com.loopers.interfaces.api.ApiResponse;
 import com.loopers.interfaces.api.purchasing.PurchasingV1Dto;
 import com.loopers.utils.DatabaseCleanUp;
@@ -119,7 +119,7 @@ public class PurchasingV1ApiE2ETest {
             List.of(
                 new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
             ),
-            new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+            new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -252,7 +252,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -357,7 +357,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -468,7 +468,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();

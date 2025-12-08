@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.paymentgateway;
+package com.loopers.infrastructure.payment;
 
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -67,4 +67,3 @@ public interface PaymentGatewaySchedulerClient {
         @RequestParam("orderId") String orderId
     );
 }
-

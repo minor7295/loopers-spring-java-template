@@ -11,9 +11,9 @@ import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewaySchedulerClient;
+import com.loopers.infrastructure.payment.PaymentGatewayClient;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewaySchedulerClient;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -121,6 +121,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -197,6 +198,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -268,6 +270,7 @@ class PurchasingFacadePaymentCallbackTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );

@@ -5,11 +5,12 @@ import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 사용자 도메인 서비스.
  * <p>
- * 사용자 생성 등의 도메인 로직을 처리합니다.
+ * 사용자 생성, 조회 등의 도메인 로직을 처리합니다.
  * Repository에 의존하며 데이터 무결성 제약 조건을 처리합니다.
  * </p>
  *
@@ -43,4 +44,65 @@ public class UserService {
         }
     }
 
+    /**
+     * 사용자 ID로 사용자를 조회합니다.
+     *
+     * @param userId 조회할 사용자 ID
+     * @return 조회된 사용자
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public User findByUserId(String userId) {
+        User user = userRepository.findByUserId(userId);
+        if (user == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+        return user;
+    }
+
+    /**
+     * 사용자 ID로 사용자를 조회합니다. (비관적 락)
+     * <p>
+     * 포인트 차감 등 동시성 제어가 필요한 경우 사용합니다.
+     * </p>
+     *
+     * @param userId 조회할 사용자 ID
+     * @return 조회된 사용자
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
+    @Transactional
+    public User findByUserIdForUpdate(String userId) {
+        User user = userRepository.findByUserIdForUpdate(userId);
+        if (user == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+        return user;
+    }
+
+    /**
+     * 사용자 ID (PK)로 사용자를 조회합니다.
+     *
+     * @param id 사용자 ID (PK)
+     * @return 조회된 사용자
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public User findById(Long id) {
+        User user = userRepository.findById(id);
+        if (user == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+        return user;
+    }
+
+    /**
+     * 사용자를 저장합니다.
+     *
+     * @param user 저장할 사용자
+     * @return 저장된 사용자
+     */
+    @Transactional
+    public User save(User user) {
+        return userRepository.save(user);
+    }
 }
