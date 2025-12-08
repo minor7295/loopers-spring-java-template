@@ -80,5 +80,28 @@ public class CouponService {
 
         return discountAmount;
     }
+
+    /**
+     * 쿠폰 할인 금액만 계산합니다 (쿠폰 사용 처리는 하지 않음).
+     * <p>
+     * 주문 생성 시 할인 금액을 계산하기 위해 사용됩니다.
+     * 실제 쿠폰 사용 처리는 이벤트 리스너에서 별도로 처리됩니다.
+     * </p>
+     *
+     * @param couponCode 쿠폰 코드
+     * @param subtotal 주문 소계 금액
+     * @return 할인 금액
+     * @throws CoreException 쿠폰을 찾을 수 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public Integer calculateDiscountAmount(String couponCode, Integer subtotal) {
+        // 쿠폰 존재 여부 확인
+        Coupon coupon = couponRepository.findByCode(couponCode)
+            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
+                String.format("쿠폰을 찾을 수 없습니다. (쿠폰 코드: %s)", couponCode)));
+
+        // 할인 금액 계산 (전략 패턴 사용)
+        return coupon.calculateDiscountAmount(subtotal, couponDiscountStrategyFactory);
+    }
 }
 

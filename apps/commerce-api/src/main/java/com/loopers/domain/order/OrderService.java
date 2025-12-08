@@ -1,5 +1,7 @@
 package com.loopers.domain.order;
 
+import com.loopers.domain.order.OrderEvent;
+import com.loopers.domain.order.OrderEventPublisher;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.user.Point;
@@ -28,6 +30,7 @@ import java.util.Optional;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final OrderEventPublisher orderEventPublisher;
 
     /**
      * 주문을 저장합니다.
@@ -125,7 +128,13 @@ public class OrderService {
     public Order completeOrder(Long orderId) {
         Order order = getById(orderId);
         order.complete();
-        return orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+        
+        // 주문 완료 이벤트 발행 (데이터 플랫폼 전송을 위해)
+        OrderEvent.OrderCompleted event = OrderEvent.OrderCompleted.from(savedOrder);
+        orderEventPublisher.publish(event);
+        
+        return savedOrder;
     }
 
     /**
@@ -138,12 +147,16 @@ public class OrderService {
      * @param products 주문 아이템에 해당하는 상품 목록 (락이 이미 획득된 상태)
      * @param user 사용자 엔티티 (락이 이미 획득된 상태)
      * @param refundPointAmount 환불할 포인트 금액
+     * @param reason 취소 사유
      * @throws CoreException 주문 또는 사용자 정보가 null인 경우
      */
     @Transactional
-    public void cancelOrder(Order order, List<Product> products, User user, Long refundPointAmount) {
+    public void cancelOrder(Order order, List<Product> products, User user, Long refundPointAmount, String reason) {
         if (order == null || user == null) {
             throw new CoreException(ErrorType.BAD_REQUEST, "취소할 주문과 사용자 정보는 필수입니다.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "취소 사유는 필수입니다.");
         }
 
         // 주문 취소
@@ -157,7 +170,11 @@ public class OrderService {
             user.receivePoint(Point.of(refundPointAmount));
         }
 
-        orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+        
+        // 주문 취소 이벤트 발행 (데이터 플랫폼 전송을 위해)
+        OrderEvent.OrderCanceled event = OrderEvent.OrderCanceled.from(savedOrder, reason);
+        orderEventPublisher.publish(event);
     }
 
     /**
@@ -184,11 +201,20 @@ public class OrderService {
         if (paymentStatus == PaymentStatus.SUCCESS) {
             // 결제 성공: 주문 완료
             order.complete();
-            orderRepository.save(order);
+            Order savedOrder = orderRepository.save(order);
+            
+            // 주문 완료 이벤트 발행 (데이터 플랫폼 전송을 위해)
+            OrderEvent.OrderCompleted event = OrderEvent.OrderCompleted.from(savedOrder);
+            orderEventPublisher.publish(event);
         } else if (paymentStatus == PaymentStatus.FAILED) {
             // 결제 실패: 주문 취소 (재고 원복 및 포인트 환불은 애플리케이션 레이어에서 처리)
             order.cancel();
-            orderRepository.save(order);
+            Order savedOrder = orderRepository.save(order);
+            
+            // 주문 취소 이벤트 발행 (데이터 플랫폼 전송을 위해)
+            String reason = "결제 실패로 인한 주문 취소";
+            OrderEvent.OrderCanceled event = OrderEvent.OrderCanceled.from(savedOrder, reason);
+            orderEventPublisher.publish(event);
         }
         // PENDING 상태: 상태 유지 (아무 작업도 하지 않음)
     }

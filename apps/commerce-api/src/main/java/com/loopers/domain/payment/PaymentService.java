@@ -32,6 +32,7 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;  // 인터페이스에 의존 (DIP 준수)
     private final PaymentFailureClassifier paymentFailureClassifier;
+    private final PaymentEventPublisher paymentEventPublisher;
     
     @Value("${payment.callback.base-url}")
     private String callbackBaseUrl;
@@ -123,10 +124,30 @@ public class PaymentService {
      */
     @Transactional
     public void toSuccess(Long paymentId, LocalDateTime completedAt) {
+        toSuccess(paymentId, completedAt, null);
+    }
+
+    /**
+     * 결제를 SUCCESS 상태로 전이합니다.
+     * <p>
+     * 멱등성 보장: 이미 SUCCESS 상태인 경우 아무 작업도 하지 않습니다.
+     * </p>
+     *
+     * @param paymentId 결제 ID
+     * @param completedAt PG 완료 시각
+     * @param transactionKey 트랜잭션 키 (null 가능)
+     * @throws CoreException 결제를 찾을 수 없는 경우
+     */
+    @Transactional
+    public void toSuccess(Long paymentId, LocalDateTime completedAt, String transactionKey) {
         Payment payment = paymentRepository.findById(paymentId)
             .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "결제를 찾을 수 없습니다."));
         payment.toSuccess(completedAt); // Entity에 위임
         paymentRepository.save(payment);
+        
+        // 결제 완료 이벤트 발행
+        PaymentEvent.PaymentCompleted event = PaymentEvent.PaymentCompleted.from(payment, transactionKey);
+        paymentEventPublisher.publish(event);
     }
 
     /**
@@ -142,10 +163,31 @@ public class PaymentService {
      */
     @Transactional
     public void toFailed(Long paymentId, String failureReason, LocalDateTime completedAt) {
+        toFailed(paymentId, failureReason, completedAt, null);
+    }
+
+    /**
+     * 결제를 FAILED 상태로 전이합니다.
+     * <p>
+     * 멱등성 보장: 이미 FAILED 상태인 경우 아무 작업도 하지 않습니다.
+     * </p>
+     *
+     * @param paymentId 결제 ID
+     * @param failureReason 실패 사유
+     * @param completedAt PG 완료 시각
+     * @param transactionKey 트랜잭션 키 (null 가능)
+     * @throws CoreException 결제를 찾을 수 없는 경우
+     */
+    @Transactional
+    public void toFailed(Long paymentId, String failureReason, LocalDateTime completedAt, String transactionKey) {
         Payment payment = paymentRepository.findById(paymentId)
             .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "결제를 찾을 수 없습니다."));
         payment.toFailed(failureReason, completedAt); // Entity에 위임
         paymentRepository.save(payment);
+        
+        // 결제 실패 이벤트 발행
+        PaymentEvent.PaymentFailed event = PaymentEvent.PaymentFailed.from(payment, failureReason, transactionKey);
+        paymentEventPublisher.publish(event);
     }
 
     /**
@@ -295,10 +337,10 @@ public class PaymentService {
         Payment payment = paymentOpt.get();
         
         if (status == PaymentStatus.SUCCESS) {
-            toSuccess(payment.getId(), LocalDateTime.now());
+            toSuccess(payment.getId(), LocalDateTime.now(), transactionKey);
             log.info("결제 콜백 처리 완료: SUCCESS. (orderId: {}, transactionKey: {})", orderId, transactionKey);
         } else if (status == PaymentStatus.FAILED) {
-            toFailed(payment.getId(), reason != null ? reason : "결제 실패", LocalDateTime.now());
+            toFailed(payment.getId(), reason != null ? reason : "결제 실패", LocalDateTime.now(), transactionKey);
             log.warn("결제 콜백 처리 완료: FAILED. (orderId: {}, transactionKey: {}, reason: {})",
                 orderId, transactionKey, reason);
         } else {
