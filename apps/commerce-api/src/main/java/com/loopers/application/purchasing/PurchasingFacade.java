@@ -220,7 +220,7 @@ public class PurchasingFacade {
             paymentService.toSuccess(payment.getId(), java.time.LocalDateTime.now());
             productService.saveAll(products);
             userService.save(user);
-            log.info("포인트+쿠폰으로 전액 결제 완료. (orderId: {})", savedOrder.getId());
+            log.debug("포인트+쿠폰으로 전액 결제 완료. (orderId: {})", savedOrder.getId());
             return OrderInfo.from(savedOrder);
         }
 
@@ -248,11 +248,10 @@ public class PurchasingFacade {
                         if (transactionKey != null) {
                             // 결제 성공: 별도 트랜잭션에서 주문 상태를 COMPLETED로 변경
                             updateOrderStatusToCompleted(orderId, transactionKey);
-                            log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", orderId, transactionKey);
                         } else {
                             // PG 요청 실패: 외부 시스템 장애로 간주
                             // 주문은 PENDING 상태로 유지되어 나중에 상태 확인 API나 콜백으로 복구 가능
-                            log.info("PG 결제 요청 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                            log.debug("PG 결제 요청 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
                         }
                     } catch (Exception e) {
                         // PG 요청 중 예외 발생 시에도 주문은 이미 저장되어 있으므로 유지
@@ -483,12 +482,12 @@ public class PurchasingFacade {
             
             // 이미 완료되거나 취소된 주문인 경우 처리하지 않음 (정상적인 경우이므로 true 반환)
             if (order.getStatus() == OrderStatus.COMPLETED) {
-                log.info("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                log.debug("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return true;
             }
             
             if (order.getStatus() == OrderStatus.CANCELED) {
-                log.info("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                log.debug("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return true;
             }
             
@@ -512,7 +511,7 @@ public class PurchasingFacade {
                 return true;
             } else {
                 // PENDING 상태: 아직 처리 중 (정상적인 경우이므로 true 반환)
-                log.info("결제 상태 확인 결과, 아직 처리 중입니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, transactionKey: {})",
+                log.debug("결제 상태 확인 결과, 아직 처리 중입니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, transactionKey: {})",
                     orderId, transactionKey);
                 return true;
             }
@@ -537,7 +536,7 @@ public class PurchasingFacade {
             Order order = orderService.getById(orderId);
             
             if (order.getStatus() == OrderStatus.COMPLETED) {
-                log.info("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                log.debug("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return;
             }
             
@@ -579,8 +578,6 @@ public class PurchasingFacade {
             
             // 결과 처리
             if (result instanceof PaymentRequestResult.Success success) {
-                log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
-                    orderId, success.transactionKey());
                 return success.transactionKey();
             } else if (result instanceof PaymentRequestResult.Failure failure) {
                 // PaymentService 내부에서 이미 실패 분류가 완료되었으므로, 여기서는 처리만 수행
@@ -589,13 +586,13 @@ public class PurchasingFacade {
                 // Circuit Breaker OPEN은 외부 시스템 장애이므로 주문을 취소하지 않음
                 if ("CIRCUIT_BREAKER_OPEN".equals(failure.errorCode())) {
                     // 외부 시스템 장애: 주문은 PENDING 상태로 유지
-                    log.info("Circuit Breaker OPEN 상태. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
+                    log.warn("Circuit Breaker OPEN 상태. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
                     return null;
                 }
                 
                 if (failure.isTimeout()) {
                     // 타임아웃: 상태 확인 후 복구
-                    log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
+                    log.debug("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
                     paymentService.recoverAfterTimeout(userId, orderId);
                 } else if (!failure.isRetryable()) {
                     // 비즈니스 실패: 주문 취소 (별도 트랜잭션으로 처리)
@@ -613,7 +610,6 @@ public class PurchasingFacade {
         } catch (Exception e) {
             // 기타 예외 처리
             log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
-            log.info("예상치 못한 오류 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
             return null;
         }
     }
@@ -660,13 +656,13 @@ public class PurchasingFacade {
             
             // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
             if (order.getStatus() == OrderStatus.COMPLETED) {
-                log.info("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+                log.debug("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
             
             if (order.getStatus() == OrderStatus.CANCELED) {
-                log.info("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+                log.debug("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
@@ -875,7 +871,7 @@ public class PurchasingFacade {
 
                 // 이미 취소된 주문인 경우 처리하지 않음
                 if (order.getStatus() == OrderStatus.CANCELED) {
-                    log.info("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
+                    log.debug("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
                     return;
                 }
 

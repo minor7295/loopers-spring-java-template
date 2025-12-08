@@ -124,7 +124,6 @@ public class PaymentGatewayImpl implements PaymentGateway {
             && response.meta().result() == PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
             && response.data() != null) {
             String transactionKey = response.data().transactionKey();
-            log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})", orderId, transactionKey);
             metrics.recordSuccess("paymentGatewayClient");
             return new PaymentRequestResult.Success(transactionKey);
         } else {

@@ -119,9 +119,9 @@ public class Resilience4jRetryConfig {
         // Exponential Backoff 적용하여 일시적 오류 자동 복구
         retryRegistry.addConfiguration("paymentGatewaySchedulerClient", retryConfig);
 
-        log.info("Resilience4j Retry 설정 완료:");
-        log.info("  - 결제 요청 API (paymentGatewayClient): Retry 없음 (유저 요청 경로 - 빠른 실패)");
-        log.info("  - 조회 API (paymentGatewaySchedulerClient): Exponential Backoff 적용 (스케줄러 - 비동기/배치 기반 Retry)");
+        log.debug("Resilience4j Retry 설정 완료:");
+        log.debug("  - 결제 요청 API (paymentGatewayClient): Retry 없음 (유저 요청 경로 - 빠른 실패)");
+        log.debug("  - 조회 API (paymentGatewaySchedulerClient): Exponential Backoff 적용 (스케줄러 - 비동기/배치 기반 Retry)");
 
         return retryRegistry;
     }

@@ -303,7 +303,7 @@ public class PaymentService {
                 orderId, transactionKey, reason);
         } else {
             // PENDING 상태: 상태 유지
-            log.info("결제 콜백 처리: PENDING 상태 유지. (orderId: {}, transactionKey: {})", orderId, transactionKey);
+            log.debug("결제 콜백 처리: PENDING 상태 유지. (orderId: {}, transactionKey: {})", orderId, transactionKey);
         }
     }
     
@@ -343,7 +343,7 @@ public class PaymentService {
                 log.warn("타임아웃 후 상태 확인 완료: FAILED. (orderId: {})", orderId);
             } else {
                 // PENDING 상태: 상태 유지
-                log.info("타임아웃 후 상태 확인: PENDING 상태 유지. (orderId: {})", orderId);
+                log.debug("타임아웃 후 상태 확인: PENDING 상태 유지. (orderId: {})", orderId);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
