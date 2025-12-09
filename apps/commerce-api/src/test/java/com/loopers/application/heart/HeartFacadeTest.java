@@ -1,6 +1,6 @@
-package com.loopers.application.like;
+package com.loopers.application.heart;
 
-import com.loopers.application.catalog.ProductCacheService;
+import com.loopers.application.product.ProductCacheService;
 import com.loopers.domain.like.Like;
 import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 
 @DisplayName("LikeFacade 좋아요 등록/취소/중복 방지 흐름 검증")
-class LikeFacadeTest {
+class HeartFacadeTest {
 
     @Mock
     private LikeRepository likeRepository;
@@ -43,7 +43,7 @@ class LikeFacadeTest {
     private ProductCacheService productCacheService;
 
     @InjectMocks
-    private LikeFacade likeFacade;
+    private HeartFacade heartFacade;
 
     private static final String DEFAULT_USER_ID = "testuser";
     private static final Long DEFAULT_USER_INTERNAL_ID = 1L;
@@ -63,7 +63,7 @@ class LikeFacadeTest {
             .thenReturn(Optional.empty());
 
         // act
-        likeFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
         verify(likeRepository).save(any(Like.class));
@@ -79,7 +79,7 @@ class LikeFacadeTest {
             .thenReturn(Optional.of(like));
 
         // act
-        likeFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
         verify(likeRepository).delete(like);
@@ -94,7 +94,7 @@ class LikeFacadeTest {
             .thenReturn(Optional.of(Like.of(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID)));
 
         // act
-        likeFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert - save는 한 번만 호출되어야 함 (중복 방지)
         verify(likeRepository, never()).save(any(Like.class));
@@ -109,7 +109,7 @@ class LikeFacadeTest {
             .thenReturn(Optional.empty()); // 좋아요 없음
 
         // act - 좋아요가 없는 상태에서 취소 시도
-        likeFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert - 예외가 발생하지 않아야 함 (멱등성 보장)
         verify(likeRepository).findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
@@ -124,7 +124,7 @@ class LikeFacadeTest {
         when(userRepository.findByUserId(unknownUserId)).thenReturn(null);
 
         // act & assert
-        assertThatThrownBy(() -> likeFacade.addLike(unknownUserId, DEFAULT_PRODUCT_ID))
+        assertThatThrownBy(() -> heartFacade.addLike(unknownUserId, DEFAULT_PRODUCT_ID))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -138,7 +138,7 @@ class LikeFacadeTest {
         when(productRepository.findById(nonExistentProductId)).thenReturn(Optional.empty());
 
         // act & assert
-        assertThatThrownBy(() -> likeFacade.addLike(DEFAULT_USER_ID, nonExistentProductId))
+        assertThatThrownBy(() -> heartFacade.addLike(DEFAULT_USER_ID, nonExistentProductId))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -166,13 +166,13 @@ class LikeFacadeTest {
             .thenReturn(List.of(product1, product2));
         
         // act
-        List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
         
         // assert
         assertThat(result).hasSize(2);
-        assertThat(result).extracting(LikeFacade.LikedProduct::productId)
+        assertThat(result).extracting(HeartFacade.LikedProduct::productId)
             .containsExactlyInAnyOrder(productId1, productId2);
-        assertThat(result).extracting(LikeFacade.LikedProduct::likesCount)
+        assertThat(result).extracting(HeartFacade.LikedProduct::likesCount)
             .containsExactlyInAnyOrder(5L, 3L);
     }
 
@@ -184,7 +184,7 @@ class LikeFacadeTest {
         when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(List.of());
         
         // act
-        List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
         
         // assert
         assertThat(result).isEmpty();
@@ -212,7 +212,7 @@ class LikeFacadeTest {
             .thenReturn(List.of(product1)); // product1만 반환 (nonExistentProductId는 없음)
         
         // act & assert
-        assertThatThrownBy(() -> likeFacade.getLikedProducts(DEFAULT_USER_ID))
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(DEFAULT_USER_ID))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -225,7 +225,7 @@ class LikeFacadeTest {
         when(userRepository.findByUserId(unknownUserId)).thenReturn(null);
         
         // act & assert
-        assertThatThrownBy(() -> likeFacade.getLikedProducts(unknownUserId))
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(unknownUserId))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }

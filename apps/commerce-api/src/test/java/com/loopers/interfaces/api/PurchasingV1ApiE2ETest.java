@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api;
 
-import com.loopers.application.pointwallet.PointWalletFacade;
+import com.loopers.application.user.UserService;
 import com.loopers.application.signup.SignUpFacade;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
@@ -72,7 +72,7 @@ public class PurchasingV1ApiE2ETest {
     private SignUpFacade signUpFacade;
 
     @Autowired
-    private PointWalletFacade pointWalletFacade;
+    private UserService userService;
 
     @Autowired
     private ProductRepository productRepository;
@@ -108,7 +108,7 @@ public class PurchasingV1ApiE2ETest {
         String email = UserTestFixture.ValidUser.EMAIL;
         String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
         signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-        pointWalletFacade.chargePoint(userId, 500_000L);
+        userService.chargePoint(userId, 500_000L);
 
         Brand brand = Brand.of("테스트 브랜드");
         Brand savedBrand = brandRepository.save(brand);
@@ -240,7 +240,7 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);
@@ -345,7 +345,7 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);
@@ -456,7 +456,7 @@ public class PurchasingV1ApiE2ETest {
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
             signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);

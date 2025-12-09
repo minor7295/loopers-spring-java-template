@@ -1,7 +1,8 @@
 package com.loopers.interfaces.api;
 
-import com.loopers.application.signup.SignUpFacade;
+import com.loopers.application.user.UserService;
 import com.loopers.domain.user.Gender;
+import com.loopers.domain.user.Point;
 import com.loopers.domain.user.UserTestFixture;
 import com.loopers.interfaces.api.pointwallet.PointWalletV1Dto;
 import com.loopers.utils.DatabaseCleanUp;
@@ -31,17 +32,17 @@ public class PointWalletV1ApiE2ETest {
     private static final String ENDPOINT_POINTS = "/api/v1/me/points";
 
     private final TestRestTemplate testRestTemplate;
-    private final SignUpFacade signUpFacade;
+    private final UserService userService;
     private final DatabaseCleanUp databaseCleanUp;
 
     @Autowired
     public PointWalletV1ApiE2ETest(
         TestRestTemplate testRestTemplate,
-        SignUpFacade signUpFacade,
+        UserService userService,
         DatabaseCleanUp databaseCleanUp
     ) {
         this.testRestTemplate = testRestTemplate;
-        this.signUpFacade = signUpFacade;
+        this.userService = userService;
         this.databaseCleanUp = databaseCleanUp;
     }
 
@@ -61,7 +62,7 @@ public class PointWalletV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, gender.name());
+            userService.create(userId, email, birthDate, gender, Point.of(0L));
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -145,7 +146,7 @@ public class PointWalletV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, gender.name());
+            userService.create(userId, email, birthDate, gender, Point.of(0L));
 
             Long chargeAmount = 1000L;
             PointWalletV1Dto.ChargeRequest requestBody = new PointWalletV1Dto.ChargeRequest(chargeAmount);

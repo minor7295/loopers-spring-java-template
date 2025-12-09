@@ -1,6 +1,7 @@
 package com.loopers.domain.payment;
 
-import com.loopers.application.purchasing.PaymentRequestCommand;
+import com.loopers.application.payment.PaymentService;
+import com.loopers.application.payment.PaymentRequestCommand;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.BeforeEach;

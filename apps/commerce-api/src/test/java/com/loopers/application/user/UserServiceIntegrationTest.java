@@ -1,8 +1,10 @@
-package com.loopers.application.pointwallet;
+package com.loopers.application.user;
 
-import com.loopers.application.signup.SignUpFacade;
 import com.loopers.domain.user.Gender;
+import com.loopers.domain.user.Point;
+import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserTestFixture;
+import com.loopers.infrastructure.user.UserJpaRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import com.loopers.utils.DatabaseCleanUp;
@@ -12,21 +14,27 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest
-@DisplayName("PointWalletFacade 통합 테스트")
-class PointWalletFacadeIntegrationTest {
+@DisplayName("UserService 통합 테스트")
+class UserServiceIntegrationTest {
     @Autowired
-    private PointWalletFacade pointWalletFacade;
+    private UserService userService;
 
-    @Autowired
-    private SignUpFacade signUpFacade;
+    @MockitoSpyBean
+    private UserJpaRepository userJpaRepository;
 
     @Autowired
     private DatabaseCleanUp databaseCleanUp;
@@ -34,6 +42,57 @@ class PointWalletFacadeIntegrationTest {
     @AfterEach
     void tearDown() {
         databaseCleanUp.truncateAllTables();
+    }
+
+    /**
+     * 테스트용 사용자를 생성합니다.
+     */
+    private void createUser(String userId, String email, String birthDate, Gender gender) {
+        userService.create(userId, email, birthDate, gender, Point.of(0L));
+    }
+
+    @DisplayName("회원 가입에 관한 통합 테스트")
+    @Nested
+    class SignUp {
+        @DisplayName("회원가입시 User 저장이 수행된다.")
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void createsUser_whenValidIdIsProvided(Gender gender) {
+            // arrange
+            String userId = UserTestFixture.ValidUser.USER_ID;
+            String email = UserTestFixture.ValidUser.EMAIL;
+            String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
+            Mockito.reset(userJpaRepository);
+
+            // act
+            User user = userService.create(userId, email, birthDate, gender, Point.of(0L));
+
+            // assert
+            assertAll(
+                () -> assertThat(user).isNotNull(),
+                () -> assertThat(user.getUserId()).isEqualTo(userId),
+                () -> verify(userJpaRepository, times(1)).save(any(User.class))
+            );
+        }
+
+        @DisplayName("이미 가입된 ID로 회원가입 시도 시, 실패한다.")
+        @ParameterizedTest
+        @EnumSource(Gender.class)
+        void fails_whenDuplicateUserIdExists(Gender gender) {
+            // arrange
+            String userId = UserTestFixture.ValidUser.USER_ID;
+            String email = UserTestFixture.ValidUser.EMAIL;
+            String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
+            userService.create(userId, email, birthDate, gender, Point.of(0L));
+
+            // act
+            CoreException result = assertThrows(CoreException.class, () ->
+                userService.create(userId, email, birthDate, gender, Point.of(0L))
+            );
+
+            // assert
+            assertThat(result.getErrorType()).isEqualTo(ErrorType.CONFLICT);
+        }
     }
 
     @DisplayName("포인트 조회에 관한 통합 테스트")
@@ -47,10 +106,10 @@ class PointWalletFacadeIntegrationTest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, gender.name());
+            createUser(userId, email, birthDate, gender);
 
             // act
-            PointWalletFacade.PointsInfo pointsInfo = pointWalletFacade.getPoints(userId);
+            UserService.PointsInfo pointsInfo = userService.getPoints(userId);
 
             // assert
             assertAll(
@@ -67,7 +126,7 @@ class PointWalletFacadeIntegrationTest {
             String userId = "unknown";
 
             // act & assert
-            assertThatThrownBy(() -> pointWalletFacade.getPoints(userId))
+            assertThatThrownBy(() -> userService.getPoints(userId))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
         }
@@ -84,11 +143,11 @@ class PointWalletFacadeIntegrationTest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, gender.name());
+            createUser(userId, email, birthDate, gender);
             Long chargeAmount = 10_000L;
 
             // act
-            PointWalletFacade.PointsInfo pointsInfo = pointWalletFacade.chargePoint(userId, chargeAmount);
+            UserService.PointsInfo pointsInfo = userService.chargePoint(userId, chargeAmount);
 
             // assert
             assertAll(
@@ -106,10 +165,9 @@ class PointWalletFacadeIntegrationTest {
             Long chargeAmount = 10_000L;
 
             // act & assert
-            assertThatThrownBy(() -> pointWalletFacade.chargePoint(userId, chargeAmount))
+            assertThatThrownBy(() -> userService.chargePoint(userId, chargeAmount))
                 .isInstanceOf(CoreException.class)
                 .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
         }
     }
 }
-
