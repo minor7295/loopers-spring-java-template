@@ -1,21 +1,23 @@
 package com.loopers.application.product;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.application.catalog.ProductInfo;
 import com.loopers.application.catalog.ProductInfoList;
+import com.loopers.cache.CacheKey;
+import com.loopers.cache.CacheTemplate;
+import com.loopers.cache.SimpleCacheKey;
 import com.loopers.domain.product.ProductDetail;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.RedisTemplate;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 상품 조회 결과를 Redis에 캐시하는 서비스.
+ * 상품 조회 결과를 캐시하는 서비스.
  * <p>
  * 상품 목록 조회와 상품 상세 조회 결과를 캐시하여 성능을 향상시킵니다.
  * </p>
@@ -29,6 +31,7 @@ import java.util.stream.Collectors;
  *
  * @author Loopers
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProductCacheService {
@@ -37,8 +40,7 @@ public class ProductCacheService {
     private static final String CACHE_KEY_PREFIX_DETAIL = "product:detail:";
     private static final Duration CACHE_TTL = Duration.ofMinutes(1); // 1분 TTL
 
-    private final RedisTemplate<String, String> redisTemplate;
-    private final ObjectMapper objectMapper;
+    private final CacheTemplate cacheTemplate;
     
     /**
      * 로컬 캐시: 상품별 좋아요 수 델타 (productId -> likeCount delta)
@@ -66,21 +68,20 @@ public class ProductCacheService {
      * @return 캐시된 상품 목록 (없으면 null)
      */
     public ProductInfoList getCachedProductList(Long brandId, String sort, int page, int size) {
-        try {
-            String key = buildListCacheKey(brandId, sort, page, size);
-            String cachedValue = redisTemplate.opsForValue().get(key);
-            
-            if (cachedValue == null) {
-                return null;
-            }
-            
-            ProductInfoList cachedList = objectMapper.readValue(cachedValue, new TypeReference<ProductInfoList>() {});
-            
-            // 로컬 캐시의 좋아요 수 델타 적용
-            return applyLikeCountDelta(cachedList);
-        } catch (Exception e) {
+        String cacheKey = buildListCacheKey(brandId, sort, page, size);
+        CacheKey<ProductInfoList> key = SimpleCacheKey.of(
+            cacheKey,
+            CACHE_TTL,
+            ProductInfoList.class
+        );
+
+        Optional<ProductInfoList> cached = cacheTemplate.get(key);
+        if (cached.isEmpty()) {
             return null;
         }
+
+        // 로컬 캐시의 좋아요 수 델타 적용
+        return applyLikeCountDelta(cached.get());
     }
 
     /**
@@ -100,14 +101,15 @@ public class ProductCacheService {
         if (page > 2) {
             return;
         }
-        
-        try {
-            String key = buildListCacheKey(brandId, sort, page, size);
-            String value = objectMapper.writeValueAsString(productInfoList);
-            redisTemplate.opsForValue().set(key, value, CACHE_TTL);
-        } catch (Exception e) {
-            // 캐시 저장 실패는 무시 (DB 조회로 폴백 가능)
-        }
+
+        String cacheKey = buildListCacheKey(brandId, sort, page, size);
+        CacheKey<ProductInfoList> key = SimpleCacheKey.of(
+            cacheKey,
+            CACHE_TTL,
+            ProductInfoList.class
+        );
+
+        cacheTemplate.put(key, productInfoList);
     }
 
     /**
@@ -120,21 +122,20 @@ public class ProductCacheService {
      * @return 캐시된 상품 정보 (없으면 null)
      */
     public ProductInfo getCachedProduct(Long productId) {
-        try {
-            String key = buildDetailCacheKey(productId);
-            String cachedValue = redisTemplate.opsForValue().get(key);
-            
-            if (cachedValue == null) {
-                return null;
-            }
-            
-            ProductInfo cachedInfo = objectMapper.readValue(cachedValue, new TypeReference<ProductInfo>() {});
-            
-            // 로컬 캐시의 좋아요 수 델타 적용
-            return applyLikeCountDelta(cachedInfo);
-        } catch (Exception e) {
+        String cacheKey = buildDetailCacheKey(productId);
+        CacheKey<ProductInfo> key = SimpleCacheKey.of(
+            cacheKey,
+            CACHE_TTL,
+            ProductInfo.class
+        );
+
+        Optional<ProductInfo> cached = cacheTemplate.get(key);
+        if (cached.isEmpty()) {
             return null;
         }
+
+        // 로컬 캐시의 좋아요 수 델타 적용
+        return applyLikeCountDelta(cached.get());
     }
 
     /**
@@ -144,13 +145,14 @@ public class ProductCacheService {
      * @param productInfo 캐시할 상품 정보
      */
     public void cacheProduct(Long productId, ProductInfo productInfo) {
-        try {
-            String key = buildDetailCacheKey(productId);
-            String value = objectMapper.writeValueAsString(productInfo);
-            redisTemplate.opsForValue().set(key, value, CACHE_TTL);
-        } catch (Exception e) {
-            // 캐시 저장 실패는 무시 (DB 조회로 폴백 가능)
-        }
+        String cacheKey = buildDetailCacheKey(productId);
+        CacheKey<ProductInfo> key = SimpleCacheKey.of(
+            cacheKey,
+            CACHE_TTL,
+            ProductInfo.class
+        );
+
+        cacheTemplate.put(key, productInfo);
     }
 
     /**
@@ -164,7 +166,6 @@ public class ProductCacheService {
      */
     private String buildListCacheKey(Long brandId, String sort, int page, int size) {
         String brandPart = brandId != null ? "brand:" + brandId : "brand:all";
-        // sort가 null이면 기본값 "latest" 사용 (컨트롤러와 동일한 기본값)
         String sortValue = sort != null ? sort : "latest";
         return String.format("%s%s:sort:%s:page:%d:size:%d", 
             CACHE_KEY_PREFIX_LIST, brandPart, sortValue, page, size);
