@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.like;
 
-import com.loopers.application.like.LikeFacade;
+import com.loopers.application.heart.HeartFacade;
 import com.loopers.interfaces.api.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/like/products")
 public class LikeV1Controller {
 
-    private final LikeFacade likeFacade;
+    private final HeartFacade heartFacade;
 
     /**
      * 상품에 좋아요를 추가합니다.
@@ -39,7 +39,7 @@ public class LikeV1Controller {
         @RequestHeader("X-USER-ID") String userId,
         @PathVariable Long productId
     ) {
-        likeFacade.addLike(userId, productId);
+        heartFacade.addLike(userId, productId);
         return ApiResponse.success(null);
     }
 
@@ -55,7 +55,7 @@ public class LikeV1Controller {
         @RequestHeader("X-USER-ID") String userId,
         @PathVariable Long productId
     ) {
-        likeFacade.removeLike(userId, productId);
+        heartFacade.removeLike(userId, productId);
         return ApiResponse.success(null);
     }
 
@@ -69,7 +69,7 @@ public class LikeV1Controller {
     public ApiResponse<LikeV1Dto.LikedProductsResponse> getLikedProducts(
         @RequestHeader("X-USER-ID") String userId
     ) {
-        var likedProducts = likeFacade.getLikedProducts(userId);
+        var likedProducts = heartFacade.getLikedProducts(userId);
         return ApiResponse.success(LikeV1Dto.LikedProductsResponse.from(likedProducts));
     }
 }

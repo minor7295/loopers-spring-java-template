@@ -1,12 +1,12 @@
-package com.loopers.application.like;
+package com.loopers.application.heart;
 
-import com.loopers.application.catalog.ProductCacheService;
+import com.loopers.application.like.LikeService;
+import com.loopers.application.product.ProductCacheService;
+import com.loopers.application.product.ProductService;
+import com.loopers.application.user.UserService;
 import com.loopers.domain.like.Like;
-import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
-import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.User;
-import com.loopers.domain.user.UserRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,10 +29,10 @@ import java.util.stream.Collectors;
  */
 @RequiredArgsConstructor
 @Component
-public class LikeFacade {
-    private final LikeRepository likeRepository;
-    private final UserRepository userRepository;
-    private final ProductRepository productRepository;
+public class HeartFacade {
+    private final LikeService likeService;
+    private final UserService userService;
+    private final ProductService productService;
     private final ProductCacheService productCacheService;
 
     /**
@@ -69,7 +69,7 @@ public class LikeFacade {
         // 먼저 일반 조회로 중복 체크 (대부분의 경우 빠르게 처리)
         // ⚠️ 주의: 애플리케이션 레벨 체크만으로는 race condition을 완전히 방지할 수 없음
         // 동시에 두 요청이 들어오면 둘 다 "없음"으로 판단 → 둘 다 저장 시도 가능
-        Optional<Like> existingLike = likeRepository.findByUserIdAndProductId(user.getId(), productId);
+        Optional<Like> existingLike = likeService.getLike(user.getId(), productId);
         if (existingLike.isPresent()) {
             return;
         }
@@ -79,7 +79,7 @@ public class LikeFacade {
         // @Transactional이 없어도 save() 호출 시 자동 트랜잭션으로 예외를 catch할 수 있음
         Like like = Like.of(user.getId(), productId);
         try {
-            likeRepository.save(like);
+            likeService.save(like);
             // 좋아요 추가 성공 시 로컬 캐시의 델타 증가
             productCacheService.incrementLikeCountDelta(productId);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
@@ -105,13 +105,13 @@ public class LikeFacade {
         User user = loadUser(userId);
         loadProduct(productId);
 
-        Optional<Like> like = likeRepository.findByUserIdAndProductId(user.getId(), productId);
+        Optional<Like> like = likeService.getLike(user.getId(), productId);
         if (like.isEmpty()) {
             return;
         }
 
         try {
-            likeRepository.delete(like.get());
+            likeService.delete(like.get());
             // 좋아요 취소 성공 시 로컬 캐시의 델타 감소
             productCacheService.decrementLikeCountDelta(productId);
         } catch (Exception e) {
@@ -144,7 +144,7 @@ public class LikeFacade {
         User user = loadUser(userId);
 
         // 사용자의 좋아요 목록 조회
-        List<Like> likes = likeRepository.findAllByUserId(user.getId());
+        List<Like> likes = likeService.getLikesByUserId(user.getId());
 
         if (likes.isEmpty()) {
             return List.of();
@@ -156,7 +156,7 @@ public class LikeFacade {
             .toList();
 
         // ✅ 배치 조회로 N+1 쿼리 문제 해결
-        Map<Long, Product> productMap = productRepository.findAllById(productIds).stream()
+        Map<Long, Product> productMap = productService.getProducts(productIds).stream()
             .collect(Collectors.toMap(Product::getId, product -> product));
 
         // 요청한 상품 ID와 조회된 상품 수가 일치하는지 확인
@@ -180,17 +180,11 @@ public class LikeFacade {
     }
 
     private User loadUser(String userId) {
-        User user = userRepository.findByUserId(userId);
-        if (user == null) {
-            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
-        }
-        return user;
+        return userService.getUser(userId);
     }
 
     private Product loadProduct(Long productId) {
-        return productRepository.findById(productId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId)));
+        return productService.getProduct(productId);
     }
 
     /**

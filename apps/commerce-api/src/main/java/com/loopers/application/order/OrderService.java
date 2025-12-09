@@ -1,5 +1,9 @@
-package com.loopers.domain.order;
+package com.loopers.application.order;
 
+import com.loopers.domain.order.Order;
+import com.loopers.domain.order.OrderItem;
+import com.loopers.domain.order.OrderRepository;
+import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.user.Point;
@@ -15,9 +19,10 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 주문 도메인 서비스.
+ * 주문 애플리케이션 서비스.
  * <p>
- * 주문의 기본 CRUD 및 상태 변경을 담당합니다.
+ * 주문의 기본 CRUD 및 상태 변경을 담당하는 애플리케이션 서비스입니다.
+ * Repository에 의존하며 트랜잭션 관리를 담당합니다.
  * </p>
  *
  * @author Loopers
@@ -60,7 +65,7 @@ public class OrderService {
      * @return 조회된 주문 (없으면 Optional.empty())
      */
     @Transactional(readOnly = true)
-    public Optional<Order> findById(Long orderId) {
+    public Optional<Order> getOrder(Long orderId) {
         return orderRepository.findById(orderId);
     }
 
@@ -71,7 +76,7 @@ public class OrderService {
      * @return 해당 사용자의 주문 목록
      */
     @Transactional(readOnly = true)
-    public List<Order> findAllByUserId(Long userId) {
+    public List<Order> getOrdersByUserId(Long userId) {
         return orderRepository.findAllByUserId(userId);
     }
 
@@ -82,7 +87,7 @@ public class OrderService {
      * @return 해당 상태의 주문 목록
      */
     @Transactional(readOnly = true)
-    public List<Order> findAllByStatus(OrderStatus status) {
+    public List<Order> getOrdersByStatus(OrderStatus status) {
         return orderRepository.findAllByStatus(status);
     }
 

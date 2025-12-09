@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.catalog;
 
-import com.loopers.application.catalog.CatalogProductFacade;
+import com.loopers.application.catalog.CatalogFacade;
 import com.loopers.application.catalog.ProductInfo;
 import com.loopers.application.catalog.ProductInfoList;
 import com.loopers.interfaces.api.ApiResponse;
@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/products")
 public class ProductV1Controller {
 
-    private final CatalogProductFacade catalogProductFacade;
+    private final CatalogFacade catalogFacade;
 
     /**
      * 상품 목록을 조회합니다.
@@ -43,7 +43,7 @@ public class ProductV1Controller {
         @RequestParam(required = false, defaultValue = "0") int page,
         @RequestParam(required = false, defaultValue = "20") int size
     ) {
-        ProductInfoList result = catalogProductFacade.getProducts(brandId, sort, page, size);
+        ProductInfoList result = catalogFacade.getProducts(brandId, sort, page, size);
         return ApiResponse.success(ProductV1Dto.ProductsResponse.from(result));
     }
 
@@ -55,7 +55,7 @@ public class ProductV1Controller {
      */
     @GetMapping("/{productId}")
     public ApiResponse<ProductV1Dto.ProductResponse> getProduct(@PathVariable Long productId) {
-        ProductInfo productInfo = catalogProductFacade.getProduct(productId);
+        ProductInfo productInfo = catalogFacade.getProduct(productId);
         return ApiResponse.success(ProductV1Dto.ProductResponse.from(productInfo));
     }
 }

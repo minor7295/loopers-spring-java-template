@@ -1,7 +1,7 @@
 package com.loopers.infrastructure.payment;
 
 import com.loopers.domain.payment.PaymentGateway;
-import com.loopers.application.purchasing.PaymentRequestCommand;
+import com.loopers.application.payment.PaymentRequestCommand;
 import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.domain.payment.PaymentStatus;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;

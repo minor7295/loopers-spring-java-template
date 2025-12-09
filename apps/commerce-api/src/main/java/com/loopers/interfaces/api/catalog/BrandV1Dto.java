@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.catalog;
 
-import com.loopers.application.catalog.CatalogBrandFacade;
+import com.loopers.application.brand.BrandService;
 
 /**
  * 브랜드 조회 API v1의 데이터 전송 객체(DTO) 컨테이너.
@@ -22,7 +22,7 @@ public class BrandV1Dto {
          * @param brandInfo 브랜드 정보
          * @return 생성된 응답 객체
          */
-        public static BrandResponse from(CatalogBrandFacade.BrandInfo brandInfo) {
+        public static BrandResponse from(BrandService.BrandInfo brandInfo) {
             return new BrandResponse(brandInfo.id(), brandInfo.name());
         }
     }

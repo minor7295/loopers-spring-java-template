@@ -1,10 +1,11 @@
 package com.loopers.application.catalog;
 
+import com.loopers.application.brand.BrandService;
+import com.loopers.application.product.ProductCacheService;
+import com.loopers.application.product.ProductService;
 import com.loopers.domain.brand.Brand;
-import com.loopers.domain.brand.BrandRepository;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
-import com.loopers.domain.product.ProductRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
@@ -25,9 +26,9 @@ import java.util.stream.Collectors;
  */
 @RequiredArgsConstructor
 @Component
-public class CatalogProductFacade {
-    private final ProductRepository productRepository;
-    private final BrandRepository brandRepository;
+public class CatalogFacade {
+    private final BrandService brandService;
+    private final ProductService productService;
     private final ProductCacheService productCacheService;
 
     /**
@@ -54,8 +55,8 @@ public class CatalogProductFacade {
         }
         
         // 캐시에 없으면 DB에서 조회
-        long totalCount = productRepository.countAll(brandId);
-        List<Product> products = productRepository.findAll(brandId, normalizedSort, page, size);
+        long totalCount = productService.countAll(brandId);
+        List<Product> products = productService.findAll(brandId, normalizedSort, page, size);
         
         if (products.isEmpty()) {
             ProductInfoList emptyResult = new ProductInfoList(List.of(), totalCount, page, size);
@@ -72,7 +73,7 @@ public class CatalogProductFacade {
             .toList();
         
         // 브랜드 배치 조회 및 Map으로 변환 (O(1) 조회를 위해)
-        Map<Long, Brand> brandMap = brandRepository.findAllById(brandIds).stream()
+        Map<Long, Brand> brandMap = brandService.getBrands(brandIds).stream()
             .collect(Collectors.toMap(Brand::getId, brand -> brand));
         
         // 상품 정보 변환 (이미 조회한 Product 재사용)
@@ -116,12 +117,10 @@ public class CatalogProductFacade {
         }
         
         // 캐시에 없으면 DB에서 조회
-        Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
+        Product product = productService.getProduct(productId);
         
         // 브랜드 조회
-        Brand brand = brandRepository.findById(product.getBrandId())
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "브랜드를 찾을 수 없습니다."));
+        Brand brand = brandService.getBrand(product.getBrandId());
         
         // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
         Long likesCount = product.getLikeCount();

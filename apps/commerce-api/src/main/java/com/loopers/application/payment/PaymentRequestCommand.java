@@ -1,4 +1,4 @@
-package com.loopers.application.purchasing;
+package com.loopers.application.payment;
 
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;

@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.catalog;
 
-import com.loopers.application.catalog.CatalogBrandFacade;
+import com.loopers.application.brand.BrandService;
 import com.loopers.interfaces.api.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/brands")
 public class BrandV1Controller {
 
-    private final CatalogBrandFacade catalogBrandFacade;
+    private final BrandService brandService;
 
     /**
      * 브랜드 정보를 조회합니다.
@@ -32,7 +32,7 @@ public class BrandV1Controller {
      */
     @GetMapping("/{brandId}")
     public ApiResponse<BrandV1Dto.BrandResponse> getBrand(@PathVariable Long brandId) {
-        CatalogBrandFacade.BrandInfo brandInfo = catalogBrandFacade.getBrand(brandId);
+        BrandService.BrandInfo brandInfo = brandService.getBrand(brandId);
         return ApiResponse.success(BrandV1Dto.BrandResponse.from(brandInfo));
     }
 }

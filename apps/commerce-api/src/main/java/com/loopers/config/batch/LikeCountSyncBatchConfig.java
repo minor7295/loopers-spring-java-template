@@ -1,6 +1,6 @@
 package com.loopers.config.batch;
 
-import com.loopers.application.catalog.ProductCacheService;
+import com.loopers.application.product.ProductCacheService;
 import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.ProductRepository;
 import lombok.RequiredArgsConstructor;

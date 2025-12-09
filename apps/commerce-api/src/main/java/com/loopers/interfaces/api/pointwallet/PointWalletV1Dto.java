@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.pointwallet;
 
-import com.loopers.application.pointwallet.PointWalletFacade;
+import com.loopers.application.user.UserService;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
@@ -24,7 +24,7 @@ public class PointWalletV1Dto {
          * @param pointsInfo 포인트 정보
          * @return 생성된 응답 객체
          */
-        public static PointsResponse from(PointWalletFacade.PointsInfo pointsInfo) {
+        public static PointsResponse from(UserService.PointsInfo pointsInfo) {
             return new PointsResponse(pointsInfo.userId(), pointsInfo.balance());
         }
     }

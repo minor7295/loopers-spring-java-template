@@ -1,6 +1,6 @@
-package com.loopers.domain.payment;
+package com.loopers.application.payment;
 
-import com.loopers.application.purchasing.PaymentRequestCommand;
+import com.loopers.domain.payment.*;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
@@ -15,10 +15,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 결제 도메인 서비스.
+ * 결제 애플리케이션 서비스.
  * <p>
- * 결제의 생성, 조회, 상태 변경 및 PG 연동을 담당합니다.
- * 도메인 로직은 Payment 엔티티에 위임하며, Service는 조회/저장 및 PG 연동을 담당합니다.
+ * 결제의 생성, 조회, 상태 변경 및 PG 연동을 담당하는 애플리케이션 서비스입니다.
+ * 도메인 로직은 Payment 엔티티에 위임하며, Service는 조회/저장, 트랜잭션 관리 및 PG 연동을 담당합니다.
  * </p>
  *
  * @author Loopers
@@ -30,7 +30,7 @@ import java.util.Optional;
 public class PaymentService {
 
     private final PaymentRepository paymentRepository;
-    private final PaymentGateway paymentGateway;  // 인터페이스에 의존 (DIP 준수)
+    private final PaymentGateway paymentGateway;
     private final PaymentFailureClassifier paymentFailureClassifier;
     
     @Value("${payment.callback.base-url}")
@@ -123,8 +123,7 @@ public class PaymentService {
      */
     @Transactional
     public void toSuccess(Long paymentId, LocalDateTime completedAt) {
-        Payment payment = paymentRepository.findById(paymentId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "결제를 찾을 수 없습니다."));
+        Payment payment = getPayment(paymentId);
         payment.toSuccess(completedAt); // Entity에 위임
         paymentRepository.save(payment);
     }
@@ -142,8 +141,7 @@ public class PaymentService {
      */
     @Transactional
     public void toFailed(Long paymentId, String failureReason, LocalDateTime completedAt) {
-        Payment payment = paymentRepository.findById(paymentId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "결제를 찾을 수 없습니다."));
+        Payment payment = getPayment(paymentId);
         payment.toFailed(failureReason, completedAt); // Entity에 위임
         paymentRepository.save(payment);
     }
@@ -156,7 +154,7 @@ public class PaymentService {
      * @throws CoreException 결제를 찾을 수 없는 경우
      */
     @Transactional(readOnly = true)
-    public Payment findById(Long paymentId) {
+    public Payment getPayment(Long paymentId) {
         return paymentRepository.findById(paymentId)
             .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "결제를 찾을 수 없습니다."));
     }
@@ -168,7 +166,7 @@ public class PaymentService {
      * @return 조회된 Payment (없으면 Optional.empty())
      */
     @Transactional(readOnly = true)
-    public Optional<Payment> findByOrderId(Long orderId) {
+    public Optional<Payment> getPaymentByOrderId(Long orderId) {
         return paymentRepository.findByOrderId(orderId);
     }
 
@@ -179,7 +177,7 @@ public class PaymentService {
      * @return 해당 사용자의 결제 목록
      */
     @Transactional(readOnly = true)
-    public List<Payment> findAllByUserId(Long userId) {
+    public List<Payment> getPaymentsByUserId(Long userId) {
         return paymentRepository.findAllByUserId(userId);
     }
 
@@ -190,7 +188,7 @@ public class PaymentService {
      * @return 해당 상태의 결제 목록
      */
     @Transactional(readOnly = true)
-    public List<Payment> findAllByStatus(PaymentStatus status) {
+    public List<Payment> getPaymentsByStatus(PaymentStatus status) {
         return paymentRepository.findAllByStatus(status);
     }
     
@@ -286,7 +284,7 @@ public class PaymentService {
      */
     @Transactional
     public void handleCallback(Long orderId, String transactionKey, PaymentStatus status, String reason) {
-        Optional<Payment> paymentOpt = findByOrderId(orderId);
+        Optional<Payment> paymentOpt = getPaymentByOrderId(orderId);
         if (paymentOpt.isEmpty()) {
             log.warn("콜백 처리 시 결제를 찾을 수 없습니다. (orderId: {})", orderId);
             return;
@@ -326,7 +324,7 @@ public class PaymentService {
             
             // 결제 상태 조회
             PaymentStatus status = getPaymentStatus(userId, orderId);
-            Optional<Payment> paymentOpt = findByOrderId(orderId);
+            Optional<Payment> paymentOpt = getPaymentByOrderId(orderId);
             
             if (paymentOpt.isEmpty()) {
                 log.warn("복구 시 결제를 찾을 수 없습니다. (orderId: {})", orderId);
