@@ -1,5 +1,6 @@
 package com.loopers.domain.coupon;
 
+import com.loopers.application.coupon.CouponService;
 import com.loopers.domain.coupon.discount.CouponDiscountStrategy;
 import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
 import com.loopers.support.error.CoreException;

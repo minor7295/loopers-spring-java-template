@@ -1,5 +1,6 @@
 package com.loopers.domain.product;
 
+import com.loopers.application.product.ProductService;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.DisplayName;
@@ -43,7 +44,7 @@ public class ProductServiceTest {
             when(productRepository.findByIdForUpdate(productId)).thenReturn(Optional.of(expectedProduct));
 
             // act
-            Product result = productService.findByIdForUpdate(productId);
+            Product result = productService.getProductForUpdate(productId);
 
             // assert
             assertThat(result).isEqualTo(expectedProduct);
@@ -59,7 +60,7 @@ public class ProductServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                productService.findByIdForUpdate(productId);
+                productService.getProductForUpdate(productId);
             });
 
             // assert

@@ -153,5 +153,32 @@ public class Order extends BaseEntity {
         }
         this.status = OrderStatus.CANCELED;
     }
+
+    /**
+     * 주문이 완료 상태인지 확인합니다.
+     *
+     * @return 완료 상태이면 true, 아니면 false
+     */
+    public boolean isCompleted() {
+        return this.status == OrderStatus.COMPLETED;
+    }
+
+    /**
+     * 주문이 취소 상태인지 확인합니다.
+     *
+     * @return 취소 상태이면 true, 아니면 false
+     */
+    public boolean isCanceled() {
+        return this.status == OrderStatus.CANCELED;
+    }
+
+    /**
+     * 주문이 대기 상태인지 확인합니다.
+     *
+     * @return 대기 상태이면 true, 아니면 false
+     */
+    public boolean isPending() {
+        return this.status == OrderStatus.PENDING;
+    }
 }
 

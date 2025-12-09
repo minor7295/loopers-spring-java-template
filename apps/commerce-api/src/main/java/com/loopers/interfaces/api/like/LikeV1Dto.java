@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.like;
 
-import com.loopers.application.like.LikeFacade;
+import com.loopers.application.heart.HeartFacade;
 
 import java.util.List;
 
@@ -25,7 +25,7 @@ public class LikeV1Dto {
          * @param likedProducts 좋아요한 상품 목록
          * @return 생성된 응답 객체
          */
-        public static LikedProductsResponse from(List<LikeFacade.LikedProduct> likedProducts) {
+        public static LikedProductsResponse from(List<HeartFacade.LikedProduct> likedProducts) {
             return new LikedProductsResponse(
                 likedProducts.stream()
                     .map(LikedProductResponse::from)
@@ -58,7 +58,7 @@ public class LikeV1Dto {
          * @param likedProduct 좋아요한 상품 정보
          * @return 생성된 응답 객체
          */
-        public static LikedProductResponse from(LikeFacade.LikedProduct likedProduct) {
+        public static LikedProductResponse from(HeartFacade.LikedProduct likedProduct) {
             return new LikedProductResponse(
                 likedProduct.productId(),
                 likedProduct.name(),

@@ -1,4 +1,4 @@
-package com.loopers.application.like;
+package com.loopers.application.heart;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
@@ -37,10 +37,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @Import(MySqlTestContainersConfig.class)
 @DisplayName("LikeFacade 동시성 테스트")
-class LikeFacadeConcurrencyTest {
+class HeartFacadeConcurrencyTest {
 
     @Autowired
-    private LikeFacade likeFacade;
+    private HeartFacade heartFacade;
 
     @Autowired
     private UserRepository userRepository;
@@ -116,7 +116,7 @@ class LikeFacadeConcurrencyTest {
         for (User user : users) {
             executorService.submit(() -> {
                 try {
-                    likeFacade.addLike(user.getUserId(), productId);
+                    heartFacade.addLike(user.getUserId(), productId);
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -159,7 +159,7 @@ class LikeFacadeConcurrencyTest {
         for (int i = 0; i < concurrentRequestCount; i++) {
             executorService.submit(() -> {
                 try {
-                    likeFacade.addLike(userId, productId);
+                    heartFacade.addLike(userId, productId);
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     synchronized (exceptions) {
@@ -233,19 +233,19 @@ class LikeFacadeConcurrencyTest {
         String userId2 = user2.getUserId();
         
         // user1이 상품1, 상품2에 좋아요를 이미 누른 상태
-        likeFacade.addLike(userId1, product1.getId());
-        likeFacade.addLike(userId1, product2.getId());
+        heartFacade.addLike(userId1, product1.getId());
+        heartFacade.addLike(userId1, product2.getId());
         
         ExecutorService executorService = Executors.newFixedThreadPool(20);
         CountDownLatch latch = new CountDownLatch(20);
-        List<List<LikeFacade.LikedProduct>> allResults = new ArrayList<>();
+        List<List<HeartFacade.LikedProduct>> allResults = new ArrayList<>();
         
         // act
         // 여러 스레드에서 동시에 조회를 수행
         for (int i = 0; i < 10; i++) {
             executorService.submit(() -> {
                 try {
-                    List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(userId1);
+                    List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(userId1);
                     synchronized (allResults) {
                         allResults.add(result);
                     }
@@ -267,14 +267,14 @@ class LikeFacadeConcurrencyTest {
                     if (index % 2 == 0) {
                         // user2가 상품1에 좋아요 추가
                         try {
-                            likeFacade.addLike(userId2, product1.getId());
+                            heartFacade.addLike(userId2, product1.getId());
                         } catch (Exception e) {
                             // 이미 좋아요가 있으면 무시
                         }
                     } else {
                         // user2가 상품2에 좋아요 추가
                         try {
-                            likeFacade.addLike(userId2, product2.getId());
+                            heartFacade.addLike(userId2, product2.getId());
                         } catch (Exception e) {
                             // 이미 좋아요가 있으면 무시
                         }
@@ -310,25 +310,25 @@ class LikeFacadeConcurrencyTest {
         // 참고: allResults는 동기화 이전에 조회된 결과이므로 likesCount가 0일 수 있습니다.
         // 이 테스트는 @Transactional(readOnly = true)의 일관성 보장을 검증하는 것이 목적이므로,
         // 동시성 테스트 중 조회된 결과의 상품 ID 일관성만 확인합니다.
-        for (List<LikeFacade.LikedProduct> result : allResults) {
+        for (List<HeartFacade.LikedProduct> result : allResults) {
             // user1의 좋아요 목록에는 상품1, 상품2가 포함되어야 함
             List<Long> resultProductIds = result.stream()
-                .map(LikeFacade.LikedProduct::productId)
+                .map(HeartFacade.LikedProduct::productId)
                 .sorted()
                 .toList();
             assertThat(resultProductIds).contains(product1.getId(), product2.getId());
         }
         
         // 최종 상태 확인 (동기화 후)
-        List<LikeFacade.LikedProduct> finalResult = likeFacade.getLikedProducts(userId1);
+        List<HeartFacade.LikedProduct> finalResult = heartFacade.getLikedProducts(userId1);
         List<Long> finalProductIds = finalResult.stream()
-            .map(LikeFacade.LikedProduct::productId)
+            .map(HeartFacade.LikedProduct::productId)
             .sorted()
             .toList();
         assertThat(finalProductIds).containsExactlyInAnyOrder(product1.getId(), product2.getId());
         
         // 동기화 후에는 정확한 좋아요 수가 반영되어야 함
-        for (LikeFacade.LikedProduct likedProduct : finalResult) {
+        for (HeartFacade.LikedProduct likedProduct : finalResult) {
             assertThat(likedProduct.likesCount()).isGreaterThan(0);
         }
     }

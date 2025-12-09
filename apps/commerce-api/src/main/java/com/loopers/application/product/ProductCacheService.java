@@ -1,7 +1,9 @@
-package com.loopers.application.catalog;
+package com.loopers.application.product;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.application.catalog.ProductInfo;
+import com.loopers.application.catalog.ProductInfoList;
 import com.loopers.domain.product.ProductDetail;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;

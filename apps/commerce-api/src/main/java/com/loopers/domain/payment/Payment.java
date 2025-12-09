@@ -238,6 +238,33 @@ public class Payment extends BaseEntity {
         return status.isCompleted();
     }
 
+    /**
+     * 결제가 대기 상태인지 확인합니다.
+     *
+     * @return 대기 상태이면 true, 아니면 false
+     */
+    public boolean isPending() {
+        return status == PaymentStatus.PENDING;
+    }
+
+    /**
+     * 결제가 성공 상태인지 확인합니다.
+     *
+     * @return 성공 상태이면 true, 아니면 false
+     */
+    public boolean isSuccess() {
+        return status.isSuccess();
+    }
+
+    /**
+     * 결제가 실패 상태인지 확인합니다.
+     *
+     * @return 실패 상태이면 true, 아니면 false
+     */
+    public boolean isFailed() {
+        return status == PaymentStatus.FAILED;
+    }
+
     private static void validateOrderId(Long orderId) {
         if (orderId == null) {
             throw new CoreException(ErrorType.BAD_REQUEST, "주문 ID는 필수입니다.");

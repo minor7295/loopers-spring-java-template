@@ -1,5 +1,9 @@
-package com.loopers.domain.coupon;
+package com.loopers.application.coupon;
 
+import com.loopers.domain.coupon.Coupon;
+import com.loopers.domain.coupon.CouponRepository;
+import com.loopers.domain.coupon.UserCoupon;
+import com.loopers.domain.coupon.UserCouponRepository;
 import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -9,10 +13,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 쿠폰 도메인 서비스.
+ * 쿠폰 애플리케이션 서비스.
  * <p>
- * 쿠폰 조회, 사용 등의 도메인 로직을 처리합니다.
- * Repository에 의존하며 비즈니스 규칙을 캡슐화합니다.
+ * 쿠폰 조회, 사용 등의 애플리케이션 로직을 처리합니다.
+ * Repository에 의존하며 트랜잭션 관리 및 동시성 제어를 담당합니다.
  * </p>
  *
  * @author Loopers

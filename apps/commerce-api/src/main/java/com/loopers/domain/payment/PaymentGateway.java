@@ -1,6 +1,6 @@
 package com.loopers.domain.payment;
 
-import com.loopers.application.purchasing.PaymentRequestCommand;
+import com.loopers.application.payment.PaymentRequestCommand;
 
 /**
  * 결제 게이트웨이 인터페이스.

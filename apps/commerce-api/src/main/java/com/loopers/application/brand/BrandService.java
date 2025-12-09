@@ -1,4 +1,4 @@
-package com.loopers.application.catalog;
+package com.loopers.application.brand;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
@@ -6,6 +6,9 @@ import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 브랜드 조회 파사드.
@@ -18,8 +21,35 @@ import org.springframework.stereotype.Component;
  */
 @RequiredArgsConstructor
 @Component
-public class CatalogBrandFacade {
+public class BrandService {
     private final BrandRepository brandRepository;
+
+    /**
+     * 브랜드 ID로 브랜드를 조회합니다.
+     *
+     * @param brandId 브랜드 ID
+     * @return 조회된 브랜드
+     * @throws CoreException 브랜드를 찾을 수 없는 경우
+     */
+    @Transactional(readOnly = true)
+    public Brand getBrand(Long brandId) {
+        return brandRepository.findById(brandId)
+            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "브랜드를 찾을 수 없습니다."));
+    }
+
+    /**
+     * 브랜드 ID 목록으로 브랜드 목록을 조회합니다.
+     * <p>
+     * 배치 조회를 통해 N+1 쿼리 문제를 해결합니다.
+     * </p>
+     *
+     * @param brandIds 조회할 브랜드 ID 목록
+     * @return 조회된 브랜드 목록
+     */
+    @Transactional(readOnly = true)
+    public List<Brand> getBrands(List<Long> brandIds) {
+        return brandRepository.findAllById(brandIds);
+    }
 
     /**
      * 브랜드 정보를 조회합니다.
@@ -28,9 +58,8 @@ public class CatalogBrandFacade {
      * @return 브랜드 정보
      * @throws CoreException 브랜드를 찾을 수 없는 경우
      */
-    public BrandInfo getBrand(Long brandId) {
-        Brand brand = brandRepository.findById(brandId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "브랜드를 찾을 수 없습니다."));
+    public BrandInfo getBrandInfo(Long brandId) {
+        Brand brand = getBrand(brandId);
         return BrandInfo.from(brand);
     }
 

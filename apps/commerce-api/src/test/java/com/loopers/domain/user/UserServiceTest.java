@@ -1,5 +1,6 @@
 package com.loopers.domain.user;
 
+import com.loopers.application.user.UserService;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +41,7 @@ public class UserServiceTest {
             when(userRepository.findByUserId(userId)).thenReturn(expectedUser);
 
             // act
-            User result = userService.findByUserId(userId);
+            User result = userService.getUser(userId);
 
             // assert
             assertThat(result).isEqualTo(expectedUser);
@@ -56,7 +57,7 @@ public class UserServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                userService.findByUserId(userId);
+                userService.getUser(userId);
             });
 
             // assert
@@ -78,7 +79,7 @@ public class UserServiceTest {
             when(userRepository.findByUserIdForUpdate(userId)).thenReturn(expectedUser);
 
             // act
-            User result = userService.findByUserIdForUpdate(userId);
+            User result = userService.getUserForUpdate(userId);
 
             // assert
             assertThat(result).isEqualTo(expectedUser);
@@ -94,7 +95,7 @@ public class UserServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                userService.findByUserIdForUpdate(userId);
+                userService.getUserForUpdate(userId);
             });
 
             // assert
@@ -116,7 +117,7 @@ public class UserServiceTest {
             when(userRepository.findById(id)).thenReturn(expectedUser);
 
             // act
-            User result = userService.findById(id);
+            User result = userService.getUserById(id);
 
             // assert
             assertThat(result).isEqualTo(expectedUser);
@@ -132,7 +133,7 @@ public class UserServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                userService.findById(id);
+                userService.getUserById(id);
             });
 
             // assert

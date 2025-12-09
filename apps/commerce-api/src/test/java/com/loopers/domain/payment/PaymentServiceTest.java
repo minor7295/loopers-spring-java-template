@@ -1,6 +1,7 @@
 package com.loopers.domain.payment;
 
-import com.loopers.application.purchasing.PaymentRequestCommand;
+import com.loopers.application.payment.PaymentService;
+import com.loopers.application.payment.PaymentRequestCommand;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,9 +34,6 @@ public class PaymentServiceTest {
     
     @Mock
     private PaymentGateway paymentGateway;
-    
-    @Mock
-    private PaymentFailureClassifier paymentFailureClassifier;
 
     @InjectMocks
     private PaymentService paymentService;
@@ -192,7 +190,7 @@ public class PaymentServiceTest {
             when(paymentRepository.findById(paymentId)).thenReturn(Optional.of(expectedPayment));
 
             // act
-            Payment result = paymentService.findById(paymentId);
+            Payment result = paymentService.getPayment(paymentId);
 
             // assert
             assertThat(result).isEqualTo(expectedPayment);
@@ -216,7 +214,7 @@ public class PaymentServiceTest {
             when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(expectedPayment));
 
             // act
-            Optional<Payment> result = paymentService.findByOrderId(orderId);
+            Optional<Payment> result = paymentService.getPaymentByOrderId(orderId);
 
             // assert
             assertThat(result).isPresent();
@@ -234,7 +232,7 @@ public class PaymentServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                paymentService.findById(paymentId);
+                paymentService.getPayment(paymentId);
             });
 
             // assert
@@ -310,7 +308,6 @@ public class PaymentServiceTest {
             
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
             when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
-            when(paymentFailureClassifier.classify("LIMIT_EXCEEDED")).thenReturn(PaymentFailureType.BUSINESS_FAILURE);
             when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
             
             // act
@@ -319,7 +316,6 @@ public class PaymentServiceTest {
             // assert
             assertThat(result).isInstanceOf(PaymentRequestResult.Failure.class);
             verify(paymentRepository, times(2)).save(any(Payment.class)); // 생성 + 실패 상태 변경
-            verify(paymentFailureClassifier, times(1)).classify("LIMIT_EXCEEDED");
         }
         
         @DisplayName("외부 시스템 장애 시 결제 상태를 PENDING으로 유지한다.")
@@ -351,7 +347,6 @@ public class PaymentServiceTest {
             
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
             when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
-            when(paymentFailureClassifier.classify("CIRCUIT_BREAKER_OPEN")).thenReturn(PaymentFailureType.EXTERNAL_SYSTEM_FAILURE);
             
             // act
             PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
@@ -359,7 +354,6 @@ public class PaymentServiceTest {
             // assert
             assertThat(result).isInstanceOf(PaymentRequestResult.Failure.class);
             verify(paymentRepository, times(1)).save(any(Payment.class)); // 생성만
-            verify(paymentFailureClassifier, times(1)).classify("CIRCUIT_BREAKER_OPEN");
             verify(paymentRepository, never()).findById(anyLong()); // 상태 변경 없음
         }
         

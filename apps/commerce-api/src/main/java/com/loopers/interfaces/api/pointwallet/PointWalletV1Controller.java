@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.pointwallet;
 
-import com.loopers.application.pointwallet.PointWalletFacade;
+import com.loopers.application.user.UserService;
 import com.loopers.interfaces.api.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class PointWalletV1Controller {
 
-    private final PointWalletFacade pointWalletFacade;
+    private final UserService userService;
 
     /**
      * 현재 사용자의 포인트를 조회합니다.
@@ -38,7 +38,7 @@ public class PointWalletV1Controller {
     public ApiResponse<PointWalletV1Dto.PointsResponse> getMyPoints(
         @RequestHeader("X-USER-ID") String userId
     ) {
-        PointWalletFacade.PointsInfo pointsInfo = pointWalletFacade.getPoints(userId);
+        UserService.PointsInfo pointsInfo = userService.getPoints(userId);
         return ApiResponse.success(PointWalletV1Dto.PointsResponse.from(pointsInfo));
     }
 
@@ -55,7 +55,7 @@ public class PointWalletV1Controller {
         @RequestHeader("X-USER-ID") String userId,
         @Valid @RequestBody PointWalletV1Dto.ChargeRequest request
     ) {
-        PointWalletFacade.PointsInfo pointsInfo = pointWalletFacade.chargePoint(userId, request.amount());
+        UserService.PointsInfo pointsInfo = userService.chargePoint(userId, request.amount());
         return ApiResponse.success(PointWalletV1Dto.PointsResponse.from(pointsInfo));
     }
 }

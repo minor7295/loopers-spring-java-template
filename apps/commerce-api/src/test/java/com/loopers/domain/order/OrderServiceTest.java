@@ -1,5 +1,6 @@
 package com.loopers.domain.order;
 
+import com.loopers.application.order.OrderService;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.user.Gender;
@@ -92,7 +93,7 @@ public class OrderServiceTest {
             when(orderRepository.findById(orderId)).thenReturn(Optional.of(expectedOrder));
 
             // act
-            Optional<Order> result = orderService.findById(orderId);
+            Optional<Order> result = orderService.getOrder(orderId);
 
             // assert
             assertThat(result).isPresent();
@@ -128,7 +129,7 @@ public class OrderServiceTest {
             when(orderRepository.findAllByUserId(userId)).thenReturn(expectedOrders);
 
             // act
-            List<Order> result = orderService.findAllByUserId(userId);
+            List<Order> result = orderService.getOrdersByUserId(userId);
 
             // assert
             assertThat(result).hasSize(1);
@@ -147,7 +148,7 @@ public class OrderServiceTest {
             when(orderRepository.findAllByStatus(status)).thenReturn(expectedOrders);
 
             // act
-            List<Order> result = orderService.findAllByStatus(status);
+            List<Order> result = orderService.getOrdersByStatus(status);
 
             // assert
             assertThat(result).hasSize(1);

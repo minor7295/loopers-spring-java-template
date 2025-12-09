@@ -1,12 +1,12 @@
-package com.loopers.application.like;
+package com.loopers.application.heart;
 
-import com.loopers.application.catalog.ProductCacheService;
+import com.loopers.application.like.LikeService;
+import com.loopers.application.product.ProductCacheService;
+import com.loopers.application.product.ProductService;
+import com.loopers.application.user.UserService;
 import com.loopers.domain.like.Like;
-import com.loopers.domain.like.LikeRepository;
 import com.loopers.domain.product.Product;
-import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.User;
-import com.loopers.domain.user.UserRepository;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,22 +28,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 
 @DisplayName("LikeFacade 좋아요 등록/취소/중복 방지 흐름 검증")
-class LikeFacadeTest {
+class HeartFacadeTest {
 
     @Mock
-    private LikeRepository likeRepository;
+    private LikeService likeService;
     
     @Mock
-    private UserRepository userRepository;
+    private UserService userService;
     
     @Mock
-    private ProductRepository productRepository;
+    private ProductService productService;
     
     @Mock
     private ProductCacheService productCacheService;
 
     @InjectMocks
-    private LikeFacade likeFacade;
+    private HeartFacade heartFacade;
 
     private static final String DEFAULT_USER_ID = "testuser";
     private static final Long DEFAULT_USER_INTERNAL_ID = 1L;
@@ -59,14 +59,14 @@ class LikeFacadeTest {
     void addLike_success() {
         // arrange
         setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
-        when(likeRepository.findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
             .thenReturn(Optional.empty());
 
         // act
-        likeFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
-        verify(likeRepository).save(any(Like.class));
+        verify(likeService).save(any(Like.class));
     }
 
     @Test
@@ -75,14 +75,14 @@ class LikeFacadeTest {
         // arrange
         setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
         Like like = Like.of(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
-        when(likeRepository.findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
             .thenReturn(Optional.of(like));
 
         // act
-        likeFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
-        verify(likeRepository).delete(like);
+        verify(likeService).delete(like);
     }
 
     @Test
@@ -90,14 +90,14 @@ class LikeFacadeTest {
     void addLike_isIdempotent() {
         // arrange
         setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
-        when(likeRepository.findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
             .thenReturn(Optional.of(Like.of(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID)));
 
         // act
-        likeFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert - save는 한 번만 호출되어야 함 (중복 방지)
-        verify(likeRepository, never()).save(any(Like.class));
+        verify(likeService, never()).save(any(Like.class));
     }
 
     @Test
@@ -105,15 +105,15 @@ class LikeFacadeTest {
     void removeLike_isIdempotent() {
         // arrange
         setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
-        when(likeRepository.findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
             .thenReturn(Optional.empty()); // 좋아요 없음
 
         // act - 좋아요가 없는 상태에서 취소 시도
-        likeFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert - 예외가 발생하지 않아야 함 (멱등성 보장)
-        verify(likeRepository).findByUserIdAndProductId(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
-        verify(likeRepository, never()).delete(any(Like.class));
+        verify(likeService).getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        verify(likeService, never()).delete(any(Like.class));
     }
 
     @Test
@@ -121,10 +121,11 @@ class LikeFacadeTest {
     void addLike_userNotFound() {
         // arrange
         String unknownUserId = "unknown";
-        when(userRepository.findByUserId(unknownUserId)).thenReturn(null);
+        when(userService.getUser(unknownUserId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다."));
 
         // act & assert
-        assertThatThrownBy(() -> likeFacade.addLike(unknownUserId, DEFAULT_PRODUCT_ID))
+        assertThatThrownBy(() -> heartFacade.addLike(unknownUserId, DEFAULT_PRODUCT_ID))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -135,10 +136,11 @@ class LikeFacadeTest {
         // arrange
         setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
         Long nonExistentProductId = 999L;
-        when(productRepository.findById(nonExistentProductId)).thenReturn(Optional.empty());
+        when(productService.getProduct(nonExistentProductId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
 
         // act & assert
-        assertThatThrownBy(() -> likeFacade.addLike(DEFAULT_USER_ID, nonExistentProductId))
+        assertThatThrownBy(() -> heartFacade.addLike(DEFAULT_USER_ID, nonExistentProductId))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -160,19 +162,18 @@ class LikeFacadeTest {
         Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
         Product product2 = createMockProduct(productId2, "상품2", 20000, 20, 1L, 3L);
         
-        when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
-        // ✅ findAllById를 사용하므로 findAllById를 mock해야 함
-        when(productRepository.findAllById(List.of(productId1, productId2)))
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
+        when(productService.getProducts(List.of(productId1, productId2)))
             .thenReturn(List.of(product1, product2));
         
         // act
-        List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
         
         // assert
         assertThat(result).hasSize(2);
-        assertThat(result).extracting(LikeFacade.LikedProduct::productId)
+        assertThat(result).extracting(HeartFacade.LikedProduct::productId)
             .containsExactlyInAnyOrder(productId1, productId2);
-        assertThat(result).extracting(LikeFacade.LikedProduct::likesCount)
+        assertThat(result).extracting(HeartFacade.LikedProduct::likesCount)
             .containsExactlyInAnyOrder(5L, 3L);
     }
 
@@ -181,10 +182,10 @@ class LikeFacadeTest {
     void getLikedProducts_emptyList() {
         // arrange
         setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
-        when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(List.of());
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(List.of());
         
         // act
-        List<LikeFacade.LikedProduct> result = likeFacade.getLikedProducts(DEFAULT_USER_ID);
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
         
         // assert
         assertThat(result).isEmpty();
@@ -205,14 +206,13 @@ class LikeFacadeTest {
         
         Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
         
-        when(likeRepository.findAllByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
-        // ✅ findAllById를 사용하므로 findAllById를 mock해야 함
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
         // nonExistentProductId가 포함되지 않아서 예외가 발생해야 함
-        when(productRepository.findAllById(List.of(productId1, nonExistentProductId)))
+        when(productService.getProducts(List.of(productId1, nonExistentProductId)))
             .thenReturn(List.of(product1)); // product1만 반환 (nonExistentProductId는 없음)
         
         // act & assert
-        assertThatThrownBy(() -> likeFacade.getLikedProducts(DEFAULT_USER_ID))
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(DEFAULT_USER_ID))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -222,10 +222,11 @@ class LikeFacadeTest {
     void getLikedProducts_userNotFound() {
         // arrange
         String unknownUserId = "unknown";
-        when(userRepository.findByUserId(unknownUserId)).thenReturn(null);
+        when(userService.getUser(unknownUserId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다."));
         
         // act & assert
-        assertThatThrownBy(() -> likeFacade.getLikedProducts(unknownUserId))
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(unknownUserId))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
@@ -240,12 +241,12 @@ class LikeFacadeTest {
     private void setupMockUser(String userId, Long userInternalId) {
         User mockUser = mock(User.class);
         when(mockUser.getId()).thenReturn(userInternalId);
-        when(userRepository.findByUserId(userId)).thenReturn(mockUser);
+        when(userService.getUser(userId)).thenReturn(mockUser);
     }
 
     private void setupMockProduct(Long productId) {
         Product mockProduct = mock(Product.class);
-        when(productRepository.findById(productId)).thenReturn(Optional.of(mockProduct));
+        when(productService.getProduct(productId)).thenReturn(mockProduct);
     }
 
     private Product createMockProduct(Long productId, String name, Integer price, Integer stock, Long brandId, Long likeCount) {

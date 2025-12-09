@@ -166,4 +166,13 @@ public class User extends BaseEntity {
         this.point = this.point.subtract(point);
     }
 
+    /**
+     * 포인트 값을 반환합니다.
+     *
+     * @return 포인트 값
+     */
+    public Long getPointValue() {
+        return this.point.getValue();
+    }
+
 }

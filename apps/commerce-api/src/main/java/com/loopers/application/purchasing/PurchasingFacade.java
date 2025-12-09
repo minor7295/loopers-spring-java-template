@@ -2,17 +2,16 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
-import com.loopers.domain.order.OrderService;
-import com.loopers.domain.order.OrderStatus;
+import com.loopers.application.order.OrderService;
 import com.loopers.domain.product.Product;
-import com.loopers.domain.product.ProductService;
+import com.loopers.application.product.ProductService;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
-import com.loopers.domain.user.UserService;
-import com.loopers.domain.coupon.CouponService;
+import com.loopers.application.user.UserService;
+import com.loopers.application.coupon.CouponService;
 import com.loopers.infrastructure.payment.PaymentGatewayDto;
 import com.loopers.domain.payment.PaymentRequestResult;
-import com.loopers.domain.payment.PaymentService;
+import com.loopers.application.payment.PaymentService;
 import com.loopers.domain.payment.Payment;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.payment.CardType;
@@ -38,8 +37,12 @@ import java.util.stream.Collectors;
 /**
  * 구매 파사드.
  * <p>
- * 주문 생성과 결제(포인트 차감), 재고 조정, 외부 연동을 조율한다.
+ * 주문 생성과 결제(포인트 차감), 재고 조정, 외부 연동을 조율하는 애플리케이션 서비스입니다.
+ * 여러 도메인 서비스를 조합하여 구매 유즈케이스를 처리합니다.
  * </p>
+ *
+ * @author Loopers
+ * @version 1.0
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -120,7 +123,7 @@ public class PurchasingFacade {
         // - userId는 UNIQUE 인덱스가 있어 Lock 범위 최소화 (Record Lock만 적용)
         // - Lost Update 방지: 동시 주문 시 포인트 중복 차감 방지 (금전적 손실 방지)
         // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
-        User user = userService.findByUserIdForUpdate(userId);
+        User user = userService.getUserForUpdate(userId);
 
         // ✅ Deadlock 방지: 상품 ID를 정렬하여 일관된 락 획득 순서 보장
         // 여러 상품을 주문할 때, 항상 동일한 순서로 락을 획득하여 deadlock 방지
@@ -144,7 +147,7 @@ public class PurchasingFacade {
             // - Lost Update 방지: 동시 주문 시 재고 음수 방지 및 정확한 차감 보장 (재고 oversell 방지)
             // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
             // - ✅ 정렬된 순서로 락 획득하여 deadlock 방지
-            Product product = productService.findByIdForUpdate(productId);
+            Product product = productService.getProductForUpdate(productId);
             productMap.put(productId, product);
         }
 
@@ -176,7 +179,7 @@ public class PurchasingFacade {
         // 포인트 잔액 검증: 포인트를 사용하는 경우에만 검증
         // 재고 차감 전에 검증하여 원자성 보장 (검증 실패 시 아무것도 변경되지 않음)
         if (usedPointAmount > 0) {
-            Long userPointBalance = user.getPoint().getValue();
+            Long userPointBalance = user.getPointValue();
             if (userPointBalance < usedPointAmount) {
                 throw new CoreException(ErrorType.BAD_REQUEST,
                     String.format("포인트가 부족합니다. (현재 잔액: %d, 사용 요청 금액: %d)", userPointBalance, usedPointAmount));
@@ -296,7 +299,7 @@ public class PurchasingFacade {
         }
 
         // ✅ Deadlock 방지: User 락을 먼저 획득하여 createOrder와 동일한 락 획득 순서 보장
-        User lockedUser = userService.findByUserIdForUpdate(user.getUserId());
+        User lockedUser = userService.getUserForUpdate(user.getUserId());
         if (lockedUser == null) {
             throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
         }
@@ -311,7 +314,7 @@ public class PurchasingFacade {
         // 정렬된 순서대로 상품 락 획득 (Deadlock 방지)
         Map<Long, Product> productMap = new java.util.HashMap<>();
         for (Long productId : sortedProductIds) {
-            Product product = productService.findByIdForUpdate(productId);
+            Product product = productService.getProductForUpdate(productId);
             productMap.put(productId, product);
         }
 
@@ -321,7 +324,7 @@ public class PurchasingFacade {
             .toList();
 
         // 실제로 사용된 포인트만 환불 (Payment에서 확인)
-        Long refundPointAmount = paymentService.findByOrderId(order.getId())
+        Long refundPointAmount = paymentService.getPaymentByOrderId(order.getId())
             .map(Payment::getUsedPoint)
             .orElse(0L);
 
@@ -341,8 +344,8 @@ public class PurchasingFacade {
      */
     @Transactional(readOnly = true)
     public List<OrderInfo> getOrders(String userId) {
-        User user = userService.findByUserId(userId);
-        List<Order> orders = orderService.findAllByUserId(user.getId());
+        User user = userService.getUser(userId);
+        List<Order> orders = orderService.getOrdersByUserId(user.getId());
         return orders.stream()
             .map(OrderInfo::from)
             .toList();
@@ -357,7 +360,7 @@ public class PurchasingFacade {
      */
     @Transactional(readOnly = true)
     public OrderInfo getOrder(String userId, Long orderId) {
-        User user = userService.findByUserId(userId);
+        User user = userService.getUser(userId);
         Order order = orderService.getById(orderId);
 
         if (!order.getUserId().equals(user.getId())) {
@@ -483,7 +486,7 @@ public class PurchasingFacade {
         String reason
     ) {
         try {
-            Order order = orderService.findById(orderId).orElse(null);
+            Order order = orderService.getOrder(orderId).orElse(null);
             
             if (order == null) {
                 log.warn("주문 상태 업데이트 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
@@ -491,12 +494,12 @@ public class PurchasingFacade {
             }
             
             // 이미 완료되거나 취소된 주문인 경우 처리하지 않음 (정상적인 경우이므로 true 반환)
-            if (order.getStatus() == OrderStatus.COMPLETED) {
+            if (order.isCompleted()) {
                 log.debug("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return true;
             }
             
-            if (order.getStatus() == OrderStatus.CANCELED) {
+            if (order.isCanceled()) {
                 log.debug("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return true;
             }
@@ -509,7 +512,7 @@ public class PurchasingFacade {
                 return true;
             } else if (paymentStatus == PaymentStatus.FAILED) {
                 // 결제 실패: 주문 취소 및 리소스 원복
-                User user = userService.findById(order.getUserId());
+                User user = userService.getUserById(order.getUserId());
                 if (user == null) {
                     log.warn("주문 상태 업데이트 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
                         orderId, order.getUserId());
@@ -545,14 +548,14 @@ public class PurchasingFacade {
         try {
             Order order = orderService.getById(orderId);
             
-            if (order.getStatus() == OrderStatus.COMPLETED) {
+            if (order.isCompleted()) {
                 log.debug("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
                 return;
             }
             
             // Payment 상태 업데이트 (PaymentService 사용)
-            paymentService.findByOrderId(orderId).ifPresent(payment -> {
-                if (payment.getStatus() == PaymentStatus.PENDING) {
+            paymentService.getPaymentByOrderId(orderId).ifPresent(payment -> {
+                if (payment.isPending()) {
                     paymentService.toSuccess(payment.getId(), java.time.LocalDateTime.now());
                 }
             });
@@ -665,13 +668,13 @@ public class PurchasingFacade {
             }
             
             // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
-            if (order.getStatus() == OrderStatus.COMPLETED) {
+            if (order.isCompleted()) {
                 log.debug("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
             
-            if (order.getStatus() == OrderStatus.CANCELED) {
+            if (order.isCanceled()) {
                 log.debug("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
@@ -741,7 +744,7 @@ public class PurchasingFacade {
             // User의 userId (String)를 가져오기 위해 User 조회
             User user;
             try {
-                user = userService.findById(userId);
+                user = userService.getUserById(userId);
             } catch (CoreException e) {
                 log.warn("콜백 검증 시 사용자를 찾을 수 없습니다. 콜백 정보를 사용합니다. (orderId: {}, userId: {})",
                     orderId, userId);
@@ -864,7 +867,7 @@ public class PurchasingFacade {
                 // 사용자 조회 (Service를 통한 접근)
                 User user;
                 try {
-                    user = userService.findByUserId(userId);
+                    user = userService.getUser(userId);
                 } catch (CoreException e) {
                     log.warn("결제 실패 처리 시 사용자를 찾을 수 없습니다. (userId: {}, orderId: {})", userId, orderId);
                     return;
@@ -880,7 +883,7 @@ public class PurchasingFacade {
                 }
 
                 // 이미 취소된 주문인 경우 처리하지 않음
-                if (order.getStatus() == OrderStatus.CANCELED) {
+                if (order.isCanceled()) {
                     log.debug("이미 취소된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", orderId);
                     return;
                 }
