@@ -66,5 +66,59 @@ public class CouponEvent {
             );
         }
     }
+
+    /**
+     * 쿠폰 적용 실패 이벤트.
+     * <p>
+     * 쿠폰 적용에 실패했을 때 발행되는 이벤트입니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param userId 사용자 ID (Long - User.id)
+     * @param couponCode 쿠폰 코드
+     * @param failureReason 실패 사유
+     * @param failedAt 실패 시각
+     */
+    public record CouponApplicationFailed(
+            Long orderId,
+            Long userId,
+            String couponCode,
+            String failureReason,
+            LocalDateTime failedAt
+    ) {
+        public CouponApplicationFailed {
+            if (orderId == null) {
+                throw new IllegalArgumentException("orderId는 필수입니다.");
+            }
+            if (userId == null) {
+                throw new IllegalArgumentException("userId는 필수입니다.");
+            }
+            if (couponCode == null || couponCode.isBlank()) {
+                throw new IllegalArgumentException("couponCode는 필수입니다.");
+            }
+            if (failureReason == null || failureReason.isBlank()) {
+                throw new IllegalArgumentException("failureReason는 필수입니다.");
+            }
+        }
+
+        /**
+         * 쿠폰 적용 실패 정보로부터 CouponApplicationFailed 이벤트를 생성합니다.
+         *
+         * @param orderId 주문 ID
+         * @param userId 사용자 ID
+         * @param couponCode 쿠폰 코드
+         * @param failureReason 실패 사유
+         * @return CouponApplicationFailed 이벤트
+         */
+        public static CouponApplicationFailed of(Long orderId, Long userId, String couponCode, String failureReason) {
+            return new CouponApplicationFailed(
+                    orderId,
+                    userId,
+                    couponCode,
+                    failureReason,
+                    LocalDateTime.now()
+            );
+        }
+    }
 }
 

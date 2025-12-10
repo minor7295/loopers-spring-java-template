@@ -9,7 +9,6 @@ import com.loopers.domain.user.PointEvent;
 import com.loopers.domain.user.PointEventPublisher;
 import com.loopers.domain.user.User;
 import com.loopers.application.user.UserService;
-import com.loopers.application.coupon.CouponService;
 import com.loopers.infrastructure.payment.PaymentGatewayDto;
 import com.loopers.domain.payment.PaymentEvent;
 import com.loopers.domain.payment.PaymentEventPublisher;
@@ -55,7 +54,6 @@ public class PurchasingFacade {
 
     private final UserService userService; // String userId를 Long id로 변환하는 데만 사용
     private final ProductService productService; // 상품 조회용으로만 사용 (재고 검증은 이벤트 핸들러에서)
-    private final CouponService couponService; // 쿠폰 적용용으로만 사용
     private final OrderService orderService;
     private final PaymentService paymentService; // Payment 조회용으로만 사용
     private final PointEventPublisher pointEventPublisher; // PointEvent 발행용
@@ -128,10 +126,19 @@ public class PurchasingFacade {
             productMap.put(productId, product);
         }
 
-        // OrderItem 생성
+        // OrderItem 생성 및 재고 사전 검증
         List<OrderItem> orderItems = new ArrayList<>();
         for (OrderItemCommand command : commands) {
             Product product = productMap.get(command.productId());
+            
+            // ✅ 재고 사전 검증 (읽기 전용 조회이므로 EDA 원칙 위반 아님)
+            // 재고 차감은 여전히 ProductEventHandler에서 처리
+            int currentStock = product.getStock();
+            if (currentStock < command.quantity()) {
+                throw new CoreException(ErrorType.BAD_REQUEST,
+                    String.format("재고가 부족합니다. (현재 재고: %d, 요청 수량: %d)", currentStock, command.quantity()));
+            }
+            
             orderItems.add(OrderItem.of(
                 product.getId(),
                 product.getName(),
@@ -140,18 +147,16 @@ public class PurchasingFacade {
             ));
         }
 
-        // 쿠폰 처리 (있는 경우)
+        // 쿠폰 코드 추출
         String couponCode = extractCouponCode(commands);
         Integer subtotal = calculateSubtotal(orderItems);
-        if (couponCode != null && !couponCode.isBlank()) {
-            couponService.applyCoupon(user.getId(), couponCode, subtotal);
-        }
 
         // 포인트 사용량
         Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
 
         // ✅ OrderService.create() 호출 → OrderEvent.OrderCreated 이벤트 발행
         // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
+        // ✅ CouponEventHandler가 OrderEvent.OrderCreated를 구독하여 쿠폰 적용 처리
         Order savedOrder = orderService.create(user.getId(), orderItems, couponCode, subtotal, usedPointAmount);
 
         // ✅ 포인트 사용 시 PointEvent.PointUsed 이벤트 발행
@@ -165,7 +170,9 @@ public class PurchasingFacade {
         }
 
         // PG 결제 금액 계산
-        Long totalAmount = savedOrder.getTotalAmount().longValue();
+        // 주의: 쿠폰 할인은 비동기로 적용되므로, PaymentEvent.PaymentRequested 발행 시점에는 할인 전 금액(subtotal)을 사용
+        // 쿠폰 할인이 적용된 후에는 OrderEventHandler가 주문의 totalAmount를 업데이트함
+        Long totalAmount = subtotal.longValue(); // 쿠폰 할인 전 금액 사용
         Long paidAmount = totalAmount - usedPointAmount;
 
         // ✅ 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행

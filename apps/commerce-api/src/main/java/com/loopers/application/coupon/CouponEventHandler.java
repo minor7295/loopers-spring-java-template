@@ -50,30 +50,24 @@ public class CouponEventHandler {
             return;
         }
 
-        try {
-            // 쿠폰 사용 처리 (쿠폰 사용 마킹 및 할인 금액 계산)
-            Integer discountAmount = couponService.applyCoupon(
-                    event.userId(),
-                    event.couponCode(),
-                    event.subtotal()
-            );
+        // 쿠폰 사용 처리 (쿠폰 사용 마킹 및 할인 금액 계산)
+        Integer discountAmount = couponService.applyCoupon(
+                event.userId(),
+                event.couponCode(),
+                event.subtotal()
+        );
 
-            // ✅ 도메인 이벤트 발행: 쿠폰이 적용되었음 (과거 사실)
-            // 주문 도메인이 이 이벤트를 구독하여 자신의 상태를 업데이트함
-            couponEventPublisher.publish(CouponEvent.CouponApplied.of(
-                    event.orderId(),
-                    event.userId(),
-                    event.couponCode(),
-                    discountAmount
-            ));
+        // ✅ 도메인 이벤트 발행: 쿠폰이 적용되었음 (과거 사실)
+        // 주문 도메인이 이 이벤트를 구독하여 자신의 상태를 업데이트함
+        couponEventPublisher.publish(CouponEvent.CouponApplied.of(
+                event.orderId(),
+                event.userId(),
+                event.couponCode(),
+                discountAmount
+        ));
 
-            log.info("쿠폰 사용 처리 완료. (orderId: {}, couponCode: {}, discountAmount: {})",
-                    event.orderId(), event.couponCode(), discountAmount);
-        } catch (Exception e) {
-            // 쿠폰 사용 처리 실패는 로그만 기록 (주문은 이미 생성되었으므로)
-            log.error("쿠폰 사용 처리 중 오류 발생. (orderId: {}, couponCode: {})",
-                    event.orderId(), event.couponCode(), e);
-        }
+        log.info("쿠폰 사용 처리 완료. (orderId: {}, couponCode: {}, discountAmount: {})",
+                event.orderId(), event.couponCode(), discountAmount);
     }
 }
 

@@ -26,5 +26,10 @@ public class CouponEventPublisherImpl implements CouponEventPublisher {
     public void publish(CouponEvent.CouponApplied event) {
         applicationEventPublisher.publishEvent(event);
     }
+
+    @Override
+    public void publish(CouponEvent.CouponApplicationFailed event) {
+        applicationEventPublisher.publishEvent(event);
+    }
 }
 

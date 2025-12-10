@@ -91,38 +91,40 @@ public class ProductEventListener {
     /**
      * 주문 생성 이벤트를 처리합니다.
      * <p>
-     * 트랜잭션 커밋 후 비동기로 실행되어 재고를 차감합니다.
+     * 주문 생성과 같은 트랜잭션 내에서 동기적으로 실행되어 재고를 차감합니다.
+     * 재고 차감은 민감한 영역이므로 하나의 트랜잭션으로 실행되어야 합니다.
      * </p>
      *
      * @param event 주문 생성 이벤트
      */
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void handleOrderCreated(OrderEvent.OrderCreated event) {
         try {
             productEventHandler.handleOrderCreated(event);
         } catch (Exception e) {
             log.error("주문 생성 이벤트 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
-            // 이벤트 처리 실패는 다른 리스너에 영향을 주지 않도록 예외를 삼킴
+            // 재고 차감 실패 시 주문 생성도 롤백되어야 하므로 예외를 다시 던짐
+            throw e;
         }
     }
 
     /**
      * 주문 취소 이벤트를 처리합니다.
      * <p>
-     * 트랜잭션 커밋 후 비동기로 실행되어 재고를 원복합니다.
+     * 주문 취소와 같은 트랜잭션 내에서 동기적으로 실행되어 재고를 원복합니다.
+     * 재고 원복은 민감한 영역이므로 하나의 트랜잭션으로 실행되어야 합니다.
      * </p>
      *
      * @param event 주문 취소 이벤트
      */
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void handleOrderCanceled(OrderEvent.OrderCanceled event) {
         try {
             productEventHandler.handleOrderCanceled(event);
         } catch (Exception e) {
             log.error("주문 취소 이벤트 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
-            // 이벤트 처리 실패는 다른 리스너에 영향을 주지 않도록 예외를 삼킴
+            // 재고 원복 실패 시 주문 취소도 롤백되어야 하므로 예외를 다시 던짐
+            throw e;
         }
     }
 }

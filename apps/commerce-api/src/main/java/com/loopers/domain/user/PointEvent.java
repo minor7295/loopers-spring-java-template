@@ -56,5 +56,59 @@ public class PointEvent {
             );
         }
     }
+
+    /**
+     * 포인트 사용 실패 이벤트.
+     * <p>
+     * 포인트 사용에 실패했을 때 발행되는 이벤트입니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param userId 사용자 ID (Long - User.id)
+     * @param usedPointAmount 사용 요청 포인트 금액
+     * @param failureReason 실패 사유
+     * @param failedAt 실패 시각
+     */
+    public record PointUsedFailed(
+            Long orderId,
+            Long userId,
+            Long usedPointAmount,
+            String failureReason,
+            LocalDateTime failedAt
+    ) {
+        public PointUsedFailed {
+            if (orderId == null) {
+                throw new IllegalArgumentException("orderId는 필수입니다.");
+            }
+            if (userId == null) {
+                throw new IllegalArgumentException("userId는 필수입니다.");
+            }
+            if (usedPointAmount == null || usedPointAmount < 0) {
+                throw new IllegalArgumentException("usedPointAmount는 0 이상이어야 합니다.");
+            }
+            if (failureReason == null || failureReason.isBlank()) {
+                throw new IllegalArgumentException("failureReason는 필수입니다.");
+            }
+        }
+
+        /**
+         * 포인트 사용 실패 정보로부터 PointUsedFailed 이벤트를 생성합니다.
+         *
+         * @param orderId 주문 ID
+         * @param userId 사용자 ID
+         * @param usedPointAmount 사용 요청 포인트 금액
+         * @param failureReason 실패 사유
+         * @return PointUsedFailed 이벤트
+         */
+        public static PointUsedFailed of(Long orderId, Long userId, Long usedPointAmount, String failureReason) {
+            return new PointUsedFailed(
+                    orderId,
+                    userId,
+                    usedPointAmount,
+                    failureReason,
+                    LocalDateTime.now()
+            );
+        }
+    }
 }
 
