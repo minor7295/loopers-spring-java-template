@@ -3,6 +3,7 @@ package com.loopers.application.user;
 import com.loopers.domain.order.OrderEvent;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.PointEvent;
+import com.loopers.domain.user.PointEventPublisher;
 import com.loopers.domain.user.User;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PointEventHandler {
 
     private final UserService userService;
+    private final PointEventPublisher pointEventPublisher;
 
     /**
      * 포인트 사용 이벤트를 처리하여 포인트를 차감합니다.
@@ -49,11 +51,20 @@ public class PointEventHandler {
             // 포인트 잔액 검증
             Long userPointBalance = user.getPointValue();
             if (userPointBalance < event.usedPointAmount()) {
+                String failureReason = String.format("포인트가 부족합니다. (현재 잔액: %d, 사용 요청 금액: %d)", 
+                        userPointBalance, event.usedPointAmount());
                 log.error("포인트가 부족합니다. (orderId: {}, userId: {}, 현재 잔액: {}, 사용 요청 금액: {})",
                         event.orderId(), event.userId(), userPointBalance, event.usedPointAmount());
-                throw new CoreException(
-                        ErrorType.BAD_REQUEST,
-                        String.format("포인트가 부족합니다. (현재 잔액: %d, 사용 요청 금액: %d)", userPointBalance, event.usedPointAmount()));
+                
+                // 포인트 사용 실패 이벤트 발행
+                pointEventPublisher.publish(PointEvent.PointUsedFailed.of(
+                        event.orderId(),
+                        event.userId(),
+                        event.usedPointAmount(),
+                        failureReason
+                ));
+                
+                throw new CoreException(ErrorType.BAD_REQUEST, failureReason);
             }
 
             // 포인트 차감
@@ -62,11 +73,23 @@ public class PointEventHandler {
 
             log.info("포인트 차감 처리 완료. (orderId: {}, userId: {}, usedPointAmount: {})",
                     event.orderId(), event.userId(), event.usedPointAmount());
+        } catch (CoreException e) {
+            // CoreException은 이미 이벤트가 발행되었거나 처리되었으므로 그대로 던짐
+            throw e;
         } catch (Exception e) {
-            // 포인트 차감 실패는 로그만 기록 (주문은 이미 생성되었으므로)
+            // 예상치 못한 오류 발생 시 실패 이벤트 발행
+            String failureReason = e.getMessage() != null ? e.getMessage() : "포인트 차감 처리 중 오류 발생";
             log.error("포인트 차감 처리 중 오류 발생. (orderId: {}, userId: {}, usedPointAmount: {})",
                     event.orderId(), event.userId(), event.usedPointAmount(), e);
-            throw e; // 포인트 부족 등 중요한 오류는 예외를 다시 던짐
+            
+            pointEventPublisher.publish(PointEvent.PointUsedFailed.of(
+                    event.orderId(),
+                    event.userId(),
+                    event.usedPointAmount(),
+                    failureReason
+            ));
+            
+            throw e;
         }
     }
 

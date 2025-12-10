@@ -18,5 +18,12 @@ public interface CouponEventPublisher {
      * @param event 쿠폰 적용 이벤트
      */
     void publish(CouponEvent.CouponApplied event);
+
+    /**
+     * 쿠폰 적용 실패 이벤트를 발행합니다.
+     *
+     * @param event 쿠폰 적용 실패 이벤트
+     */
+    void publish(CouponEvent.CouponApplicationFailed event);
 }
 

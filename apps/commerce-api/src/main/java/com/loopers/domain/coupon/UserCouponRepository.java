@@ -48,5 +48,14 @@ public interface UserCouponRepository {
      * @return 조회된 사용자 쿠폰을 담은 Optional
      */
     Optional<UserCoupon> findByUserIdAndCouponCodeForUpdate(Long userId, String couponCode);
+
+    /**
+     * 영속성 컨텍스트의 변경사항을 데이터베이스에 즉시 반영합니다.
+     * <p>
+     * Optimistic Lock을 사용하는 경우, save() 후 flush()를 호출하여
+     * version 체크를 즉시 수행하도록 합니다.
+     * </p>
+     */
+    void flush();
 }
 

@@ -18,5 +18,12 @@ public interface PointEventPublisher {
      * @param event 포인트 사용 이벤트
      */
     void publish(PointEvent.PointUsed event);
+
+    /**
+     * 포인트 사용 실패 이벤트를 발행합니다.
+     *
+     * @param event 포인트 사용 실패 이벤트
+     */
+    void publish(PointEvent.PointUsedFailed event);
 }
 

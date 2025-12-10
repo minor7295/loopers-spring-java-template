@@ -58,6 +58,14 @@ public class OrderEventHandler {
             return;
         }
 
+        // 이미 취소된 주문인 경우 처리하지 않음 (race condition 방지)
+        // 예: 결제 타임아웃으로 인해 주문이 취소되었지만, 이후 PG 상태 확인에서 SUCCESS가 반환된 경우
+        if (order.isCanceled()) {
+            log.warn("이미 취소된 주문입니다. 결제 완료 처리를 건너뜁니다. (orderId: {}, transactionKey: {})", 
+                    event.orderId(), event.transactionKey());
+            return;
+        }
+
         // 주문 완료 처리
         orderService.completeOrder(event.orderId());
         log.info("결제 완료로 인한 주문 상태 업데이트 완료. (orderId: {}, transactionKey: {})",

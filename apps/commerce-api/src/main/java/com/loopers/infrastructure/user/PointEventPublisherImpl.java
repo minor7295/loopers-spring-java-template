@@ -26,5 +26,10 @@ public class PointEventPublisherImpl implements PointEventPublisher {
     public void publish(PointEvent.PointUsed event) {
         applicationEventPublisher.publishEvent(event);
     }
+
+    @Override
+    public void publish(PointEvent.PointUsedFailed event) {
+        applicationEventPublisher.publishEvent(event);
+    }
 }
 
