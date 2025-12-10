@@ -1,6 +1,8 @@
 package com.loopers.application.order;
 
 import com.loopers.domain.order.Order;
+import com.loopers.domain.order.OrderEvent;
+import com.loopers.domain.order.OrderEventPublisher;
 import com.loopers.domain.order.OrderItem;
 import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.order.OrderStatus;
@@ -33,6 +35,7 @@ import java.util.Optional;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final OrderEventPublisher orderEventPublisher;
 
     /**
      * 주문을 저장합니다.
@@ -116,11 +119,77 @@ public class OrderService {
     @Transactional
     public Order create(Long userId, List<OrderItem> items) {
         Order order = Order.of(userId, items);
+        Order savedOrder = orderRepository.save(order);
+        
+        // 소계 계산
+        Integer subtotal = calculateSubtotal(items);
+        
+        // ✅ 도메인 이벤트 발행: 주문이 생성되었음 (과거 사실)
+        orderEventPublisher.publish(OrderEvent.OrderCreated.from(savedOrder, subtotal, 0L));
+        
+        return savedOrder;
+    }
+
+    /**
+     * 주문을 생성합니다 (쿠폰 코드와 소계 포함).
+     * <p>
+     * 주문 생성 후 OrderCreated 이벤트를 발행합니다.
+     * </p>
+     *
+     * @param userId 사용자 ID
+     * @param items 주문 아이템 목록
+     * @param couponCode 쿠폰 코드 (선택)
+     * @param subtotal 주문 소계 (쿠폰 할인 전 금액)
+     * @param usedPointAmount 사용할 포인트 금액
+     * @return 생성된 주문
+     */
+    @Transactional
+    public Order create(Long userId, List<OrderItem> items, String couponCode, Integer subtotal, Long usedPointAmount) {
+        // 쿠폰이 있어도 discountAmount는 0으로 설정 (CouponEventHandler가 이벤트를 받아 쿠폰 적용)
+        Order order = Order.of(userId, items, couponCode, 0);
+        Order savedOrder = orderRepository.save(order);
+        
+        // ✅ 도메인 이벤트 발행: 주문이 생성되었음 (과거 사실)
+        orderEventPublisher.publish(OrderEvent.OrderCreated.from(savedOrder, subtotal, usedPointAmount));
+        
+        return savedOrder;
+    }
+
+    /**
+     * 주문에 쿠폰 할인 금액을 적용합니다.
+     * <p>
+     * 이벤트 핸들러에서 쿠폰 적용 후 호출됩니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param discountAmount 할인 금액
+     * @return 업데이트된 주문
+     * @throws CoreException 주문을 찾을 수 없거나 할인을 적용할 수 없는 상태인 경우
+     */
+    @Transactional
+    public Order applyCouponDiscount(Long orderId, Integer discountAmount) {
+        Order order = getById(orderId);
+        order.applyDiscount(discountAmount);
         return orderRepository.save(order);
     }
 
     /**
+     * 주문 아이템 목록으로부터 소계 금액을 계산합니다.
+     *
+     * @param orderItems 주문 아이템 목록
+     * @return 계산된 소계 금액
+     */
+    private Integer calculateSubtotal(List<OrderItem> orderItems) {
+        return orderItems.stream()
+                .mapToInt(item -> item.getPrice() * item.getQuantity())
+                .sum();
+    }
+
+    /**
      * 주문을 완료 상태로 변경합니다.
+     * <p>
+     * 주문 완료 후 OrderCompleted 이벤트를 발행합니다.
+     * </p>
      *
      * @param orderId 주문 ID
      * @return 완료된 주문
@@ -130,7 +199,37 @@ public class OrderService {
     public Order completeOrder(Long orderId) {
         Order order = getById(orderId);
         order.complete();
-        return orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+        
+        // ✅ 도메인 이벤트 발행: 주문이 완료되었음 (과거 사실)
+        orderEventPublisher.publish(OrderEvent.OrderCompleted.from(savedOrder));
+        
+        return savedOrder;
+    }
+
+    /**
+     * 주문을 취소 상태로 변경합니다.
+     * <p>
+     * 주문 취소 후 OrderCanceled 이벤트를 발행합니다.
+     * 리소스 원복(재고, 포인트)은 별도 이벤트 핸들러에서 처리합니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param reason 취소 사유
+     * @param refundPointAmount 환불할 포인트 금액
+     * @return 취소된 주문
+     * @throws CoreException 주문을 찾을 수 없는 경우
+     */
+    @Transactional
+    public Order cancelOrder(Long orderId, String reason, Long refundPointAmount) {
+        Order order = getById(orderId);
+        order.cancel();
+        Order savedOrder = orderRepository.save(order);
+        
+        // ✅ 도메인 이벤트 발행: 주문이 취소되었음 (과거 사실)
+        orderEventPublisher.publish(OrderEvent.OrderCanceled.from(savedOrder, reason, refundPointAmount));
+        
+        return savedOrder;
     }
 
     /**

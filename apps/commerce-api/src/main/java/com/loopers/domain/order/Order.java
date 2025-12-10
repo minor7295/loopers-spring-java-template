@@ -180,5 +180,25 @@ public class Order extends BaseEntity {
     public boolean isPending() {
         return this.status == OrderStatus.PENDING;
     }
+
+    /**
+     * 주문에 할인 금액을 적용합니다.
+     * PENDING 상태의 주문에만 할인 적용이 가능합니다.
+     *
+     * @param discountAmount 적용할 할인 금액
+     * @throws CoreException PENDING 상태가 아니거나 할인 금액이 유효하지 않을 경우
+     */
+    public void applyDiscount(Integer discountAmount) {
+        if (this.status != OrderStatus.PENDING) {
+            throw new CoreException(ErrorType.BAD_REQUEST,
+                String.format("할인을 적용할 수 없는 주문 상태입니다. (현재 상태: %s)", this.status));
+        }
+        if (discountAmount == null || discountAmount < 0) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "할인 금액은 0 이상이어야 합니다.");
+        }
+        this.discountAmount = discountAmount;
+        Integer subtotal = calculateTotalAmount(this.items);
+        this.totalAmount = Math.max(0, subtotal - this.discountAmount);
+    }
 }
 
