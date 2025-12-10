@@ -178,9 +178,41 @@ public class Product extends BaseEntity {
     }
 
     /**
+     * 좋아요 수를 증가시킵니다.
+     * <p>
+     * 이벤트 기반 집계에서 사용됩니다.
+     * </p>
+     *
+     * @throws CoreException 좋아요 수가 음수가 되는 경우
+     */
+    public void incrementLikeCount() {
+        if (this.likeCount < 0) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "좋아요 수는 음수가 될 수 없습니다.");
+        }
+        this.likeCount++;
+    }
+
+    /**
+     * 좋아요 수를 감소시킵니다.
+     * <p>
+     * 이벤트 기반 집계에서 사용됩니다.
+     * </p>
+     * <p>
+     * <b>멱등성 보장:</b> 좋아요 수가 0인 경우에도 예외를 던지지 않고 그대로 유지합니다.
+     * 이는 동시성 상황에서 이미 삭제된 좋아요에 대한 이벤트가 중복 처리될 수 있기 때문입니다.
+     * </p>
+     */
+    public void decrementLikeCount() {
+        if (this.likeCount > 0) {
+            this.likeCount--;
+        }
+        // likeCount가 0인 경우는 이미 삭제된 상태이므로 그대로 유지 (멱등성 보장)
+    }
+
+    /**
      * 좋아요 수를 업데이트합니다.
      * <p>
-     * 비동기 집계 스케줄러에서 사용됩니다.
+     * 배치 집계나 초기화 시 사용됩니다.
      * </p>
      *
      * @param likeCount 업데이트할 좋아요 수 (0 이상)
