@@ -23,6 +23,7 @@ import java.util.Map;
  *   <li><b>책임 분리:</b> ProductService는 상품 도메인 비즈니스 로직, ProductEventHandler는 이벤트 처리 로직</li>
  *   <li><b>이벤트 핸들러:</b> 이벤트를 받아서 처리하는 역할을 명확히 나타냄</li>
  *   <li><b>도메인 경계 준수:</b> 상품 도메인은 자신의 상태만 관리하며, 주문 생성/취소 이벤트를 구독하여 재고 관리</li>
+ *   <li><b>EDA 원칙:</b> LikeEvent를 구독하여 상품 좋아요 수 및 캐시를 업데이트</li>
  * </ul>
  * </p>
  *
@@ -35,9 +36,17 @@ import java.util.Map;
 public class ProductEventHandler {
 
     private final ProductService productService;
+    private final ProductCacheService productCacheService;
 
     /**
      * 좋아요 추가 이벤트를 처리하여 상품의 좋아요 수를 증가시킵니다.
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>이벤트 구독:</b> LikeEvent.LikeAdded 이벤트를 구독하여 상품 도메인 상태 업데이트</li>
+     *   <li><b>책임 분리:</b> HeartFacade는 이 핸들러의 존재를 모르며, 이벤트만 발행</li>
+     * </ul>
+     * </p>
      *
      * @param event 좋아요 추가 이벤트
      */
@@ -49,11 +58,21 @@ public class ProductEventHandler {
         // ✅ 이벤트 기반 실시간 집계: Product.likeCount 직접 증가
         productService.incrementLikeCount(event.productId());
         
+        // ✅ 캐시 델타 업데이트: 좋아요 추가 시 로컬 캐시의 델타 증가
+        productCacheService.incrementLikeCountDelta(event.productId());
+        
         log.debug("좋아요 수 증가 완료: productId={}", event.productId());
     }
 
     /**
      * 좋아요 취소 이벤트를 처리하여 상품의 좋아요 수를 감소시킵니다.
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>이벤트 구독:</b> LikeEvent.LikeRemoved 이벤트를 구독하여 상품 도메인 상태 업데이트</li>
+     *   <li><b>책임 분리:</b> HeartFacade는 이 핸들러의 존재를 모르며, 이벤트만 발행</li>
+     * </ul>
+     * </p>
      *
      * @param event 좋아요 취소 이벤트
      */
@@ -64,6 +83,9 @@ public class ProductEventHandler {
         
         // ✅ 이벤트 기반 실시간 집계: Product.likeCount 직접 감소
         productService.decrementLikeCount(event.productId());
+        
+        // ✅ 캐시 델타 업데이트: 좋아요 취소 시 로컬 캐시의 델타 감소
+        productCacheService.decrementLikeCountDelta(event.productId());
         
         log.debug("좋아요 수 감소 완료: productId={}", event.productId());
     }
