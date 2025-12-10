@@ -25,4 +25,11 @@ public interface PaymentEventPublisher {
      * @param event 결제 실패 이벤트
      */
     void publish(PaymentEvent.PaymentFailed event);
+
+    /**
+     * 결제 요청 이벤트를 발행합니다.
+     *
+     * @param event 결제 요청 이벤트
+     */
+    void publish(PaymentEvent.PaymentRequested event);
 }
