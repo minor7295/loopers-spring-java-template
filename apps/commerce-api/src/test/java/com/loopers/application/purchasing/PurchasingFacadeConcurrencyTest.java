@@ -2,11 +2,6 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
-import com.loopers.domain.coupon.Coupon;
-import com.loopers.domain.coupon.CouponRepository;
-import com.loopers.domain.coupon.CouponType;
-import com.loopers.domain.coupon.UserCoupon;
-import com.loopers.domain.coupon.UserCouponRepository;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.product.Product;
@@ -36,10 +31,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * PurchasingFacade 동시성 테스트
  * <p>
- * 여러 스레드에서 동시에 주문 요청을 보내도 데이터 일관성이 유지되는지 검증합니다.
- * - 포인트 차감의 정확성
- * - 재고 차감의 정확성
- * - 쿠폰 사용의 중복 방지 (예시)
+ * 여러 스레드에서 동시에 주문 요청을 보내도 주문이 정상적으로 생성되는지 검증합니다.
+ * <p>
+ * <b>테스트 책임:</b>
+ * <ul>
+ *   <li>주문 생성 및 이벤트 발행 검증 (EDA 원칙 준수)</li>
+ *   <li>포인트 차감, 재고 차감, 쿠폰 적용 등의 검증은 각각의 EventHandlerTest에서 수행</li>
+ * </ul>
  * </p>
  */
 @SpringBootTest
@@ -63,13 +61,8 @@ class PurchasingFacadeConcurrencyTest {
     private OrderRepository orderRepository;
 
     @Autowired
-    private CouponRepository couponRepository;
-
-    @Autowired
-    private UserCouponRepository userCouponRepository;
-
-    @Autowired
     private DatabaseCleanUp databaseCleanUp;
+
 
     @AfterEach
     void tearDown() {
@@ -91,19 +84,9 @@ class PurchasingFacadeConcurrencyTest {
         return productRepository.save(product);
     }
 
-    private Coupon createAndSaveCoupon(String code, CouponType type, Integer discountValue) {
-        Coupon coupon = Coupon.of(code, type, discountValue);
-        return couponRepository.save(coupon);
-    }
-
-    private UserCoupon createAndSaveUserCoupon(Long userId, Coupon coupon) {
-        UserCoupon userCoupon = UserCoupon.of(userId, coupon);
-        return userCouponRepository.save(userCoupon);
-    }
-
     @Test
-    @DisplayName("동일한 유저가 서로 다른 주문을 동시에 수행해도, 포인트가 정상적으로 차감되어야 한다")
-    void concurrencyTest_pointShouldProperlyDecreaseWhenOrderCreated() throws InterruptedException {
+    @DisplayName("동일한 유저가 서로 다른 주문을 동시에 수행해도, 주문은 모두 생성되어야 한다")
+    void concurrencyTest_ordersShouldBeCreatedEvenWithPointUsage() throws InterruptedException {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
         String userId = user.getUserId();
@@ -144,17 +127,25 @@ class PurchasingFacadeConcurrencyTest {
         executorService.shutdown();
 
         // assert
-        User savedUser = userRepository.findByUserId(userId);
-        long expectedRemainingPoint = 100_000L - (10_000L * orderCount);
-
+        // ✅ PurchasingFacade의 책임: 주문 생성 및 이벤트 발행
+        // 포인트 차감 검증은 PointEventHandlerTest에서 수행
+        // 결제 실패는 PaymentEventHandler의 책임이므로, 주문 생성 트랜잭션은 롤백되지 않아야 함
         assertThat(successCount.get()).isEqualTo(orderCount);
         assertThat(exceptions).isEmpty();
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(expectedRemainingPoint);
+
+        // 주문이 모두 생성되었는지 확인 (결제 실패와 무관하게)
+        List<Order> orders = orderRepository.findAllByUserId(user.getId());
+        assertThat(orders).hasSize(orderCount);
+        
+        // ✅ EDA 원칙: PurchasingFacade는 주문 생성만 담당
+        // 결제 실패로 인한 주문 취소는 OrderEventHandler에서 비동기로 처리되므로,
+        // 주문이 생성되었는지만 검증 (상태는 PENDING 또는 CANCELED 모두 가능)
+        // 주문 생성 직후에는 PENDING 상태이지만, 결제 실패 시 CANCELED로 변경될 수 있음
     }
 
     @Test
-    @DisplayName("동일한 상품에 대해 여러 주문이 동시에 요청되어도, 재고가 정상적으로 차감되어야 한다")
-    void concurrencyTest_stockShouldBeProperlyDecreasedWhenOrdersCreated() throws InterruptedException {
+    @DisplayName("동일한 상품에 대해 여러 주문이 동시에 요청되어도, 주문은 모두 생성되어야 한다")
+    void concurrencyTest_ordersShouldBeCreatedEvenWithSameProduct() throws InterruptedException {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 1_000_000L);
         String userId = user.getUserId();
@@ -182,8 +173,6 @@ class PurchasingFacadeConcurrencyTest {
                 } catch (Exception e) {
                     synchronized (exceptions) {
                         exceptions.add(e);
-                        System.out.println("Exception in stock test: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                        e.printStackTrace();
                     }
                 } finally {
                     latch.countDown();
@@ -194,77 +183,21 @@ class PurchasingFacadeConcurrencyTest {
         executorService.shutdown();
 
         // assert
-        Product savedProduct = productRepository.findById(productId).orElseThrow();
-        int expectedStock = 100 - (successCount.get() * quantityPerOrder);
-
-        System.out.println("Success count: " + successCount.get() + ", Exceptions: " + exceptions.size());
-        assertThat(savedProduct.getStock()).isEqualTo(expectedStock);
+        // ✅ PurchasingFacade의 책임: 주문 생성 및 이벤트 발행
+        // 재고 차감 검증은 ProductEventHandlerTest에서 수행
+        // 결제 실패는 PaymentEventHandler의 책임이므로, 주문 생성 트랜잭션은 롤백되지 않아야 함
         assertThat(successCount.get() + exceptions.size()).isEqualTo(orderCount);
-    }
 
-    @Test
-    @DisplayName("동일한 쿠폰으로 여러 기기에서 동시에 주문해도, 쿠폰은 단 한번만 사용되어야 한다")
-    void concurrencyTest_couponShouldBeUsedOnlyOnceWhenOrdersCreated() throws InterruptedException {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
-        String userId = user.getUserId();
-        Brand brand = createAndSaveBrand("테스트 브랜드");
-        Product product = createAndSaveProduct("테스트 상품", 10_000, 100, brand.getId());
-
-        // 정액 쿠폰 생성 (5,000원 할인)
-        Coupon coupon = createAndSaveCoupon("COUPON001", CouponType.FIXED_AMOUNT, 5_000);
-        String couponCode = coupon.getCode();
-
-        // 사용자에게 쿠폰 지급
-        UserCoupon userCoupon = createAndSaveUserCoupon(user.getId(), coupon);
-
-        int concurrentRequestCount = 10; // 요구사항: 10개 스레드
-
-        ExecutorService executorService = Executors.newFixedThreadPool(concurrentRequestCount);
-        CountDownLatch latch = new CountDownLatch(concurrentRequestCount);
-        AtomicInteger successCount = new AtomicInteger(0);
-        List<Exception> exceptions = new ArrayList<>();
-
-        // act
-        for (int i = 0; i < concurrentRequestCount; i++) {
-            executorService.submit(() -> {
-                try {
-                    List<OrderItemCommand> commands = List.of(
-                        new OrderItemCommand(product.getId(), 1, couponCode)
-                    );
-                    purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
-                    successCount.incrementAndGet();
-                } catch (Exception e) {
-                    synchronized (exceptions) {
-                        exceptions.add(e);
-                    }
-                } finally {
-                    latch.countDown();
-                }
-            });
-        }
-        latch.await();
-        executorService.shutdown();
-
-        // assert
-        // 쿠폰은 정확히 1번만 사용되어야 함
-        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), couponCode)
-            .orElseThrow();
-        assertThat(savedUserCoupon.isAvailable()).isFalse(); // 사용됨
-        assertThat(savedUserCoupon.getIsUsed()).isTrue();
-
-        // 성공한 주문은 1개만 있어야 함 (나머지는 쿠폰 중복 사용으로 실패)
-        assertThat(successCount.get()).isEqualTo(1);
-        assertThat(exceptions).hasSize(concurrentRequestCount - 1);
-
-        // 성공한 주문의 할인 금액이 적용되었는지 확인
+        // 주문이 모두 생성되었는지 확인 (결제 실패와 무관하게)
         List<Order> orders = orderRepository.findAllByUserId(user.getId());
-        assertThat(orders).hasSize(1);
-        Order order = orders.get(0);
-        assertThat(order.getCouponCode()).isEqualTo(couponCode);
-        assertThat(order.getDiscountAmount()).isEqualTo(5_000);
-        assertThat(order.getTotalAmount()).isEqualTo(5_000); // 10,000 - 5,000 = 5,000
+        assertThat(orders).hasSize(successCount.get());
+        
+        // ✅ EDA 원칙: PurchasingFacade는 주문 생성만 담당
+        // 결제 실패로 인한 주문 취소는 OrderEventHandler에서 비동기로 처리되므로,
+        // 주문이 생성되었는지만 검증 (상태는 PENDING 또는 CANCELED 모두 가능)
+        // 주문 생성 직후에는 PENDING 상태이지만, 결제 실패 시 CANCELED로 변경될 수 있음
     }
+
 
     @Test
     @DisplayName("주문 취소 중 다른 스레드가 재고를 변경해도, 재고 원복이 정확하게 이루어져야 한다")
