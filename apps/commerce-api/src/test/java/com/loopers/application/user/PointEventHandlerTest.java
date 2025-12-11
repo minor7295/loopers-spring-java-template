@@ -1,5 +1,6 @@
 package com.loopers.application.user;
 
+import com.loopers.domain.order.OrderEvent;
 import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.PointEvent;
@@ -14,13 +15,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -31,9 +28,6 @@ class PointEventHandlerTest {
 
     @Autowired
     private PointEventHandler pointEventHandler;
-
-    @Autowired
-    private com.loopers.interfaces.event.user.PointEventListener pointEventListener;
 
     @Autowired
     private UserRepository userRepository;
@@ -57,13 +51,21 @@ class PointEventHandlerTest {
 
     @Test
     @DisplayName("포인트를 정상적으로 사용할 수 있다")
-    void handlePointUsed_success() {
+    void handleOrderCreated_success() {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        PointEvent.PointUsed event = PointEvent.PointUsed.of(1L, user.getId(), 10_000L);
+        OrderEvent.OrderCreated event = new OrderEvent.OrderCreated(
+                1L,
+                user.getId(),
+                null, // couponCode
+                10_000, // subtotal
+                10_000L, // usedPointAmount
+                List.of(), // orderItems
+                LocalDateTime.now()
+        );
 
         // act
-        pointEventHandler.handlePointUsed(event);
+        pointEventHandler.handleOrderCreated(event);
 
         // assert
         // 포인트 사용 실패 이벤트는 발행되지 않아야 함
@@ -77,14 +79,22 @@ class PointEventHandlerTest {
 
     @Test
     @DisplayName("포인트 잔액이 부족하면 포인트 사용 실패 이벤트가 발행된다")
-    void handlePointUsed_publishesFailedEvent_whenInsufficientBalance() {
+    void handleOrderCreated_publishesFailedEvent_whenInsufficientBalance() {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 5_000L);
-        PointEvent.PointUsed event = PointEvent.PointUsed.of(1L, user.getId(), 10_000L);
+        OrderEvent.OrderCreated event = new OrderEvent.OrderCreated(
+                1L,
+                user.getId(),
+                null, // couponCode
+                10_000, // subtotal
+                10_000L, // usedPointAmount
+                List.of(), // orderItems
+                LocalDateTime.now()
+        );
 
         // act
         try {
-            pointEventHandler.handlePointUsed(event);
+            pointEventHandler.handleOrderCreated(event);
         } catch (Exception e) {
             // 예외는 예상된 동작
         }
@@ -108,13 +118,21 @@ class PointEventHandlerTest {
 
     @Test
     @DisplayName("포인트 잔액이 정확히 사용 요청 금액과 같으면 정상적으로 사용할 수 있다")
-    void handlePointUsed_success_whenBalanceEqualsUsedAmount() {
+    void handleOrderCreated_success_whenBalanceEqualsUsedAmount() {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 10_000L);
-        PointEvent.PointUsed event = PointEvent.PointUsed.of(1L, user.getId(), 10_000L);
+        OrderEvent.OrderCreated event = new OrderEvent.OrderCreated(
+                1L,
+                user.getId(),
+                null, // couponCode
+                10_000, // subtotal
+                10_000L, // usedPointAmount
+                List.of(), // orderItems
+                LocalDateTime.now()
+        );
 
         // act
-        pointEventHandler.handlePointUsed(event);
+        pointEventHandler.handleOrderCreated(event);
 
         // assert
         // 포인트 사용 실패 이벤트는 발행되지 않아야 함
@@ -128,13 +146,21 @@ class PointEventHandlerTest {
 
     @Test
     @DisplayName("포인트 사용량이 0이면 정상적으로 처리된다")
-    void handlePointUsed_success_whenUsedAmountIsZero() {
+    void handleOrderCreated_success_whenUsedAmountIsZero() {
         // arrange
         User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        PointEvent.PointUsed event = PointEvent.PointUsed.of(1L, user.getId(), 0L);
+        OrderEvent.OrderCreated event = new OrderEvent.OrderCreated(
+                1L,
+                user.getId(),
+                null, // couponCode
+                10_000, // subtotal
+                0L, // usedPointAmount
+                List.of(), // orderItems
+                LocalDateTime.now()
+        );
 
         // act
-        pointEventHandler.handlePointUsed(event);
+        pointEventHandler.handleOrderCreated(event);
 
         // assert
         // 포인트 사용 실패 이벤트는 발행되지 않아야 함

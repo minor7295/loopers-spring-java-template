@@ -2,11 +2,10 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
+import com.loopers.application.order.CreateOrderCommand;
 import com.loopers.application.order.OrderService;
 import com.loopers.domain.product.Product;
 import com.loopers.application.product.ProductService;
-import com.loopers.domain.user.PointEvent;
-import com.loopers.domain.user.PointEventPublisher;
 import com.loopers.domain.user.User;
 import com.loopers.application.user.UserService;
 import com.loopers.infrastructure.payment.PaymentGatewayDto;
@@ -56,7 +55,6 @@ public class PurchasingFacade {
     private final ProductService productService; // 상품 조회용으로만 사용 (재고 검증은 이벤트 핸들러에서)
     private final OrderService orderService;
     private final PaymentService paymentService; // Payment 조회용으로만 사용
-    private final PointEventPublisher pointEventPublisher; // PointEvent 발행용
     private final PaymentEventPublisher paymentEventPublisher; // PaymentEvent 발행용
 
     /**
@@ -66,8 +64,7 @@ public class PurchasingFacade {
      * 2. 상품 조회 (재고 검증은 이벤트 핸들러에서 처리)<br>
      * 3. 쿠폰 할인 적용<br>
      * 4. 주문 저장 및 OrderEvent.OrderCreated 이벤트 발행<br>
-     * 5. 포인트 사용 시 PointEvent.PointUsed 이벤트 발행<br>
-     * 6. 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행<br>
+     * 5. 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행<br>
      * </p>
      * <p>
      * <b>결제 방식:</b>
@@ -81,7 +78,7 @@ public class PurchasingFacade {
      * <b>EDA 원칙:</b>
      * <ul>
      *   <li><b>이벤트 기반:</b> 재고 차감은 OrderEvent.OrderCreated를 구독하는 ProductEventHandler에서 처리</li>
-     *   <li><b>이벤트 기반:</b> 포인트 차감은 PointEvent.PointUsed를 구독하는 PointEventHandler에서 처리</li>
+     *   <li><b>이벤트 기반:</b> 포인트 차감은 OrderEvent.OrderCreated를 구독하는 PointEventHandler에서 처리</li>
      *   <li><b>이벤트 기반:</b> Payment 생성 및 PG 결제는 PaymentEvent.PaymentRequested를 구독하는 PaymentEventHandler에서 처리</li>
      *   <li><b>느슨한 결합:</b> Product, User, Payment 애그리거트를 직접 수정하지 않고 이벤트만 발행</li>
      * </ul>
@@ -154,20 +151,20 @@ public class PurchasingFacade {
         // 포인트 사용량
         Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
 
+        // ✅ CreateOrderCommand 생성
+        CreateOrderCommand createOrderCommand = new CreateOrderCommand(
+            user.getId(),
+            orderItems,
+            couponCode,
+            subtotal,
+            usedPointAmount
+        );
+
         // ✅ OrderService.create() 호출 → OrderEvent.OrderCreated 이벤트 발행
         // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
         // ✅ CouponEventHandler가 OrderEvent.OrderCreated를 구독하여 쿠폰 적용 처리
-        Order savedOrder = orderService.create(user.getId(), orderItems, couponCode, subtotal, usedPointAmount);
-
-        // ✅ 포인트 사용 시 PointEvent.PointUsed 이벤트 발행
-        // ✅ PointEventHandler가 PointEvent.PointUsed를 구독하여 포인트 차감 처리
-        if (usedPointAmount > 0) {
-            pointEventPublisher.publish(PointEvent.PointUsed.of(
-                savedOrder.getId(),
-                user.getId(),
-                usedPointAmount
-            ));
-        }
+        // ✅ PointEventHandler가 OrderEvent.OrderCreated를 구독하여 포인트 차감 처리
+        Order savedOrder = orderService.create(createOrderCommand);
 
         // PG 결제 금액 계산
         // 주의: 쿠폰 할인은 비동기로 적용되므로, PaymentEvent.PaymentRequested 발행 시점에는 할인 전 금액(subtotal)을 사용
