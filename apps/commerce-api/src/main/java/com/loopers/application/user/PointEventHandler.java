@@ -38,12 +38,21 @@ public class PointEventHandler {
     private final PointEventPublisher pointEventPublisher;
 
     /**
-     * 포인트 사용 이벤트를 처리하여 포인트를 차감합니다.
+     * 주문 생성 이벤트를 처리하여 포인트를 차감합니다.
+     * <p>
+     * OrderEvent.OrderCreated를 구독하여 포인트 차감 Command를 실행합니다.
+     * </p>
      *
-     * @param event 포인트 사용 이벤트
+     * @param event 주문 생성 이벤트
      */
     @Transactional
-    public void handlePointUsed(PointEvent.PointUsed event) {
+    public void handleOrderCreated(OrderEvent.OrderCreated event) {
+        // 포인트 사용량이 없는 경우 처리하지 않음
+        if (event.usedPointAmount() == null || event.usedPointAmount() == 0) {
+            log.debug("포인트 사용량이 없어 포인트 차감 처리를 건너뜁니다. (orderId: {})", event.orderId());
+            return;
+        }
+
         try {
             // 사용자 조회 (비관적 락 사용)
             User user = userService.getUserById(event.userId());
@@ -67,8 +76,9 @@ public class PointEventHandler {
                 throw new CoreException(ErrorType.BAD_REQUEST, failureReason);
             }
 
-            // 포인트 차감
-            user.deductPoint(Point.of(event.usedPointAmount()));
+            // ✅ OrderEvent.OrderCreated를 구독하여 포인트 차감 Command 실행
+            DeductPointCommand command = new DeductPointCommand(event.userId(), event.usedPointAmount());
+            user.deductPoint(Point.of(command.usedPointAmount()));
             userService.save(user);
 
             log.info("포인트 차감 처리 완료. (orderId: {}, userId: {}, usedPointAmount: {})",

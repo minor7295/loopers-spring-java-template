@@ -22,12 +22,7 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CouponEventHandlerTest {
 
     @Autowired
-    private com.loopers.interfaces.event.coupon.CouponEventListener couponEventListener;
+    private CouponEventHandler couponEventHandler;
 
     @Autowired
     private UserRepository userRepository;
@@ -96,7 +91,8 @@ class CouponEventHandlerTest {
         );
 
         // act
-        couponEventListener.handleOrderCreated(event);
+        // CouponEventHandler를 직접 호출하여 테스트
+        couponEventHandler.handleOrderCreated(event);
 
         // assert
         // 예외 없이 처리되어야 함
@@ -121,13 +117,8 @@ class CouponEventHandlerTest {
         );
 
         // act
-        // CouponEventListener를 통해 호출하여 실제 운영 환경과 동일한 방식으로 테스트
-        // CouponEventListener는 @Async와 @TransactionalEventListener(phase = AFTER_COMMIT)로 설정되어 있지만,
-        // 테스트에서는 동기적으로 실행되도록 설정되어 있을 수 있음
-        couponEventListener.handleOrderCreated(event);
-        
-        // 비동기 처리 대기
-        Thread.sleep(100);
+        // CouponEventHandler를 직접 호출하여 테스트
+        couponEventHandler.handleOrderCreated(event);
 
         // assert
         // 쿠폰 적용 성공 이벤트가 발행되었는지 확인
@@ -163,13 +154,8 @@ class CouponEventHandlerTest {
         );
 
         // act
-        // CouponEventListener를 통해 호출하여 실제 운영 환경과 동일한 방식으로 테스트
-        // CouponEventListener는 @Async와 @TransactionalEventListener(phase = AFTER_COMMIT)로 설정되어 있지만,
-        // 테스트에서는 동기적으로 실행되도록 설정되어 있을 수 있음
-        couponEventListener.handleOrderCreated(event);
-        
-        // 비동기 처리 대기
-        Thread.sleep(100);
+        // CouponEventHandler를 직접 호출하여 테스트
+        couponEventHandler.handleOrderCreated(event);
 
         // assert
         // 쿠폰 적용 성공 이벤트가 발행되었는지 확인
@@ -207,13 +193,12 @@ class CouponEventHandlerTest {
         );
 
         // act
-        // CouponEventListener를 통해 호출하여 실제 운영 환경과 동일한 방식으로 테스트
-        // CouponEventListener는 @Async와 @TransactionalEventListener(phase = AFTER_COMMIT)로 설정되어 있지만,
-        // 테스트에서는 동기적으로 실행되도록 설정되어 있을 수 있음
-        couponEventListener.handleOrderCreated(event);
-        
-        // 비동기 처리 대기
-        Thread.sleep(100);
+        // CouponEventHandler를 직접 호출하여 테스트
+        try {
+            couponEventHandler.handleOrderCreated(event);
+        } catch (Exception e) {
+            // 예외는 예상된 동작
+        }
 
         // assert
         // 쿠폰 적용 실패 이벤트가 발행되었는지 확인
@@ -249,13 +234,12 @@ class CouponEventHandlerTest {
         );
 
         // act
-        // CouponEventListener를 통해 호출하여 실제 운영 환경과 동일한 방식으로 테스트
-        // CouponEventListener는 @Async와 @TransactionalEventListener(phase = AFTER_COMMIT)로 설정되어 있지만,
-        // 테스트에서는 동기적으로 실행되도록 설정되어 있을 수 있음
-        couponEventListener.handleOrderCreated(event);
-        
-        // 비동기 처리 대기
-        Thread.sleep(100);
+        // CouponEventHandler를 직접 호출하여 테스트
+        try {
+            couponEventHandler.handleOrderCreated(event);
+        } catch (Exception e) {
+            // 예외는 예상된 동작
+        }
 
         // assert
         // 쿠폰 적용 실패 이벤트가 발행되었는지 확인
@@ -293,13 +277,12 @@ class CouponEventHandlerTest {
         );
 
         // act
-        // CouponEventListener를 통해 호출하여 실제 운영 환경과 동일한 방식으로 테스트
-        // CouponEventListener는 @Async와 @TransactionalEventListener(phase = AFTER_COMMIT)로 설정되어 있지만,
-        // 테스트에서는 동기적으로 실행되도록 설정되어 있을 수 있음
-        couponEventListener.handleOrderCreated(event);
-        
-        // 비동기 처리 대기
-        Thread.sleep(100);
+        // CouponEventHandler를 직접 호출하여 테스트
+        try {
+            couponEventHandler.handleOrderCreated(event);
+        } catch (Exception e) {
+            // 예외는 예상된 동작
+        }
 
         // assert
         // 쿠폰 적용 실패 이벤트가 발행되었는지 확인

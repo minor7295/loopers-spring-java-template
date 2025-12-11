@@ -1,5 +1,6 @@
 package com.loopers.domain.coupon;
 
+import com.loopers.application.coupon.ApplyCouponCommand;
 import com.loopers.application.coupon.CouponService;
 import com.loopers.domain.coupon.discount.CouponDiscountStrategy;
 import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
@@ -69,7 +70,7 @@ public class CouponServiceTest {
             when(userCouponRepository.save(any(UserCoupon.class))).thenReturn(userCoupon);
 
             // act
-            Integer result = couponService.applyCoupon(userId, couponCode, subtotal);
+            Integer result = couponService.applyCoupon(new ApplyCouponCommand(userId, couponCode, subtotal));
 
             // assert
             assertThat(result).isEqualTo(expectedDiscount);
@@ -91,7 +92,7 @@ public class CouponServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                couponService.applyCoupon(userId, couponCode, subtotal);
+                couponService.applyCoupon(new ApplyCouponCommand(userId, couponCode, subtotal));
             });
 
             // assert
@@ -117,7 +118,7 @@ public class CouponServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                couponService.applyCoupon(userId, couponCode, subtotal);
+                couponService.applyCoupon(new ApplyCouponCommand(userId, couponCode, subtotal));
             });
 
             // assert
@@ -145,7 +146,7 @@ public class CouponServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                couponService.applyCoupon(userId, couponCode, subtotal);
+                couponService.applyCoupon(new ApplyCouponCommand(userId, couponCode, subtotal));
             });
 
             // assert
@@ -180,7 +181,7 @@ public class CouponServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                couponService.applyCoupon(userId, couponCode, subtotal);
+                couponService.applyCoupon(new ApplyCouponCommand(userId, couponCode, subtotal));
             });
 
             // assert

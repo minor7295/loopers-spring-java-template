@@ -3,8 +3,10 @@ package com.loopers.application.coupon;
 import com.loopers.domain.coupon.CouponEvent;
 import com.loopers.domain.coupon.CouponEventPublisher;
 import com.loopers.domain.order.OrderEvent;
+import com.loopers.support.error.CoreException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,24 +52,65 @@ public class CouponEventHandler {
             return;
         }
 
-        // 쿠폰 사용 처리 (쿠폰 사용 마킹 및 할인 금액 계산)
-        Integer discountAmount = couponService.applyCoupon(
-                event.userId(),
-                event.couponCode(),
-                event.subtotal()
-        );
+        try {
+            // ✅ OrderEvent.OrderCreated를 구독하여 쿠폰 적용 Command 실행
+            // 쿠폰 사용 처리 (쿠폰 사용 마킹 및 할인 금액 계산)
+            Integer discountAmount = couponService.applyCoupon(
+                    new ApplyCouponCommand(
+                            event.userId(),
+                            event.couponCode(),
+                            event.subtotal()
+                    )
+            );
 
-        // ✅ 도메인 이벤트 발행: 쿠폰이 적용되었음 (과거 사실)
-        // 주문 도메인이 이 이벤트를 구독하여 자신의 상태를 업데이트함
-        couponEventPublisher.publish(CouponEvent.CouponApplied.of(
-                event.orderId(),
-                event.userId(),
-                event.couponCode(),
-                discountAmount
-        ));
+            // ✅ 도메인 이벤트 발행: 쿠폰이 적용되었음 (과거 사실)
+            // 주문 도메인이 이 이벤트를 구독하여 자신의 상태를 업데이트함
+            couponEventPublisher.publish(CouponEvent.CouponApplied.of(
+                    event.orderId(),
+                    event.userId(),
+                    event.couponCode(),
+                    discountAmount
+            ));
 
-        log.info("쿠폰 사용 처리 완료. (orderId: {}, couponCode: {}, discountAmount: {})",
-                event.orderId(), event.couponCode(), discountAmount);
+            log.info("쿠폰 사용 처리 완료. (orderId: {}, couponCode: {}, discountAmount: {})",
+                    event.orderId(), event.couponCode(), discountAmount);
+        } catch (CoreException e) {
+            // 비즈니스 예외 발생 시 실패 이벤트 발행
+            String failureReason = e.getMessage() != null ? e.getMessage() : "쿠폰 적용 실패";
+            log.error("쿠폰 적용 실패. (orderId: {}, couponCode: {})",
+                    event.orderId(), event.couponCode(), e);
+            couponEventPublisher.publish(CouponEvent.CouponApplicationFailed.of(
+                    event.orderId(),
+                    event.userId(),
+                    event.couponCode(),
+                    failureReason
+            ));
+            throw e;
+        } catch (ObjectOptimisticLockingFailureException e) {
+            // 낙관적 락 충돌: 다른 트랜잭션이 먼저 쿠폰을 사용함
+            String failureReason = "쿠폰이 이미 사용되었습니다. (동시성 충돌)";
+            log.warn("쿠폰 사용 중 낙관적 락 충돌 발생. (orderId: {}, couponCode: {})",
+                    event.orderId(), event.couponCode());
+            couponEventPublisher.publish(CouponEvent.CouponApplicationFailed.of(
+                    event.orderId(),
+                    event.userId(),
+                    event.couponCode(),
+                    failureReason
+            ));
+            throw e;
+        } catch (Exception e) {
+            // 예상치 못한 오류 발생 시 실패 이벤트 발행
+            String failureReason = e.getMessage() != null ? e.getMessage() : "쿠폰 적용 처리 중 오류 발생";
+            log.error("쿠폰 적용 처리 중 오류 발생. (orderId: {}, couponCode: {})",
+                    event.orderId(), event.couponCode(), e);
+            couponEventPublisher.publish(CouponEvent.CouponApplicationFailed.of(
+                    event.orderId(),
+                    event.userId(),
+                    event.couponCode(),
+                    failureReason
+            ));
+            throw e;
+        }
     }
 }
 
