@@ -3,6 +3,7 @@ package com.loopers.application.payment;
 import com.loopers.domain.payment.CardType;
 import com.loopers.domain.payment.Payment;
 import com.loopers.domain.payment.PaymentEvent;
+import com.loopers.domain.payment.PaymentGateway;
 import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -37,6 +38,7 @@ import java.time.LocalDateTime;
 public class PaymentEventHandler {
 
     private final PaymentService paymentService;
+    private final PaymentGateway paymentGateway;
 
     /**
      * 결제 요청 이벤트를 처리하여 Payment를 생성하고 PG 결제를 요청합니다.
@@ -93,15 +95,19 @@ public class PaymentEventHandler {
                                 // Payment 생성 시점의 totalAmount를 사용
                                 Long paidAmount = event.totalAmount() - event.usedPointAmount();
 
-                                // PG 결제 요청
-                                PaymentRequestResult result = paymentService.requestPayment(
-                                        event.orderId(),
-                                        event.userId(),
-                                        event.userEntityId(),
-                                        event.cardType(),
-                                        event.cardNo(),
-                                        paidAmount
+                                // ✅ PaymentEvent.PaymentRequested를 구독하여 결제 요청 Command 실행
+                                String callbackUrl = generateCallbackUrl(event.orderId());
+                                PaymentRequestCommand command = new PaymentRequestCommand(
+                                    event.userId(),
+                                    event.orderId(),
+                                    event.cardType(),
+                                    event.cardNo(),
+                                    paidAmount,
+                                    callbackUrl
                                 );
+
+                                // PG 결제 요청
+                                PaymentRequestResult result = paymentGateway.requestPayment(command);
 
                                 if (result instanceof PaymentRequestResult.Success success) {
                                     // 결제 성공: PaymentService.toSuccess가 PaymentCompleted 이벤트를 발행하고,
@@ -155,6 +161,16 @@ public class PaymentEventHandler {
                     ErrorType.BAD_REQUEST,
                     String.format("잘못된 카드 타입입니다. (cardType: %s)", cardType));
         }
+    }
+
+    /**
+     * 콜백 URL을 생성합니다.
+     *
+     * @param orderId 주문 ID
+     * @return 콜백 URL
+     */
+    private String generateCallbackUrl(Long orderId) {
+        return String.format("/api/v1/payments/callback?orderId=%d", orderId);
     }
 }
 

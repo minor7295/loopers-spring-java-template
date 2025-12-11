@@ -2,7 +2,6 @@ package com.loopers.interfaces.event.user;
 
 import com.loopers.application.user.PointEventHandler;
 import com.loopers.domain.order.OrderEvent;
-import com.loopers.domain.user.PointEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -34,20 +33,20 @@ public class PointEventListener {
     private final PointEventHandler pointEventHandler;
 
     /**
-     * 포인트 사용 이벤트를 처리합니다.
+     * 주문 생성 이벤트를 처리합니다.
      * <p>
      * 트랜잭션 커밋 후 비동기로 실행되어 포인트 사용 처리를 수행합니다.
      * </p>
      *
-     * @param event 포인트 사용 이벤트
+     * @param event 주문 생성 이벤트
      */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handlePointUsed(PointEvent.PointUsed event) {
+    public void handleOrderCreated(OrderEvent.OrderCreated event) {
         try {
-            pointEventHandler.handlePointUsed(event);
+            pointEventHandler.handleOrderCreated(event);
         } catch (Exception e) {
-            log.error("포인트 사용 이벤트 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
+            log.error("주문 생성 이벤트 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
             // 이벤트 처리 실패는 다른 리스너에 영향을 주지 않도록 예외를 삼킴
         }
     }
