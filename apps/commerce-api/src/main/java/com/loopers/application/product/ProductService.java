@@ -104,5 +104,45 @@ public class ProductService {
     public long countAll(Long brandId) {
         return productRepository.countAll(brandId);
     }
+
+    /**
+     * 상품의 좋아요 수를 증가시킵니다.
+     * <p>
+     * 이벤트 기반 집계에서 사용됩니다.
+     * </p>
+     * <p>
+     * <b>동시성 제어:</b> 비관적 락을 사용하지 않습니다. 좋아요 수는 정확도보다 성능이 중요하며,
+     * 약간의 오차는 허용 가능합니다. 필요시 나중에 비관적 락을 추가할 수 있습니다.
+     * </p>
+     *
+     * @param productId 상품 ID
+     * @throws CoreException 상품을 찾을 수 없는 경우
+     */
+    @Transactional
+    public void incrementLikeCount(Long productId) {
+        Product product = getProduct(productId);
+        product.incrementLikeCount();
+        productRepository.save(product);
+    }
+
+    /**
+     * 상품의 좋아요 수를 감소시킵니다.
+     * <p>
+     * 이벤트 기반 집계에서 사용됩니다.
+     * </p>
+     * <p>
+     * <b>동시성 제어:</b> 비관적 락을 사용하지 않습니다. 좋아요 수는 정확도보다 성능이 중요하며,
+     * 약간의 오차는 허용 가능합니다. 필요시 나중에 비관적 락을 추가할 수 있습니다.
+     * </p>
+     *
+     * @param productId 상품 ID
+     * @throws CoreException 상품을 찾을 수 없는 경우
+     */
+    @Transactional
+    public void decrementLikeCount(Long productId) {
+        Product product = getProduct(productId);
+        product.decrementLikeCount();
+        productRepository.save(product);
+    }
 }
 

@@ -1,6 +1,8 @@
 package com.loopers.application.like;
 
 import com.loopers.domain.like.Like;
+import com.loopers.domain.like.LikeEvent;
+import com.loopers.domain.like.LikeEventPublisher;
 import com.loopers.domain.like.LikeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -23,6 +25,7 @@ import java.util.Optional;
 @Component
 public class LikeService {
     private final LikeRepository likeRepository;
+    private final LikeEventPublisher likeEventPublisher;
 
     /**
      * 사용자 ID와 상품 ID로 좋아요를 조회합니다.
@@ -38,22 +41,36 @@ public class LikeService {
 
     /**
      * 좋아요를 저장합니다.
+     * <p>
+     * 저장 성공 시 좋아요 추가 이벤트를 발행합니다.
+     * </p>
      *
      * @param like 저장할 좋아요
      * @return 저장된 좋아요
      */
     @Transactional
     public Like save(Like like) {
-        return likeRepository.save(like);
+        Like savedLike = likeRepository.save(like);
+        
+        // ✅ 도메인 이벤트 발행: 좋아요가 추가되었음 (과거 사실)
+        likeEventPublisher.publish(LikeEvent.LikeAdded.from(savedLike));
+        
+        return savedLike;
     }
 
     /**
      * 좋아요를 삭제합니다.
+     * <p>
+     * 삭제 전에 좋아요 취소 이벤트를 발행합니다.
+     * </p>
      *
      * @param like 삭제할 좋아요
      */
     @Transactional
     public void delete(Like like) {
+        // ✅ 도메인 이벤트 발행: 좋아요가 취소되었음 (과거 사실)
+        likeEventPublisher.publish(LikeEvent.LikeRemoved.from(like));
+        
         likeRepository.delete(like);
     }
 
