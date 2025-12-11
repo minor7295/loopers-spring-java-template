@@ -34,9 +34,6 @@ public class PaymentServiceTest {
     
     @Mock
     private PaymentGateway paymentGateway;
-    
-    @Mock
-    private PaymentEventPublisher paymentEventPublisher;
 
     @InjectMocks
     private PaymentService paymentService;
@@ -116,7 +113,7 @@ public class PaymentServiceTest {
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
 
             // act
-            paymentService.toSuccess(paymentId, completedAt, null);
+            paymentService.toSuccess(paymentId, completedAt);
 
             // assert
             verify(paymentRepository, times(1)).findById(paymentId);
@@ -144,7 +141,7 @@ public class PaymentServiceTest {
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
 
             // act
-            paymentService.toFailed(paymentId, failureReason, completedAt, null);
+            paymentService.toFailed(paymentId, failureReason, completedAt);
 
             // assert
             verify(paymentRepository, times(1)).findById(paymentId);
@@ -163,7 +160,7 @@ public class PaymentServiceTest {
 
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                paymentService.toSuccess(paymentId, completedAt, null);
+                paymentService.toSuccess(paymentId, completedAt);
             });
 
             // assert

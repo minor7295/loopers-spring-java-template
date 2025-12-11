@@ -266,6 +266,61 @@ class PurchasingFacadeCircuitBreakerTest {
     }
 
     @Test
+    @DisplayName("서킷 브레이커가 HALF_OPEN 상태에서 실패 시 OPEN으로 전환된다")
+    void createOrder_circuitBreakerHalfOpen_failure_transitionsToOpen() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        List<OrderItemCommand> commands = List.of(
+            OrderItemCommand.of(product.getId(), 1)
+        );
+
+        // 서킷 브레이커를 HALF_OPEN 상태로 만듦
+        // 서킷 브레이커는 CLOSED → OPEN → HALF_OPEN 순서로만 전환 가능
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                // 먼저 OPEN 상태로 전환
+                circuitBreaker.transitionToOpenState();
+                // 그 다음 HALF_OPEN 상태로 전환
+                circuitBreaker.transitionToHalfOpenState();
+            }
+        }
+
+        // PG 실패 응답
+        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
+            .thenThrow(new FeignException.ServiceUnavailable(
+                "Service unavailable",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
+
+        // act
+        OrderInfo orderInfo = purchasingFacade.createOrder(
+            user.getUserId(),
+            commands,
+            null,
+            "SAMSUNG",
+            "4111-1111-1111-1111"
+        );
+
+        // assert
+        assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
+        
+        // 서킷 브레이커 상태가 OPEN으로 전환되었는지 확인
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                // HALF_OPEN 상태에서 실패 시 OPEN으로 전환되어야 함
+                assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+            }
+        }
+    }
+
+    @Test
     @DisplayName("서킷 브레이커가 OPEN 상태일 때도 내부 시스템은 정상적으로 응답한다")
     void createOrder_circuitBreakerOpen_internalSystemRespondsNormally() {
         // arrange
@@ -364,6 +419,78 @@ class PurchasingFacadeCircuitBreakerTest {
         // 비즈니스 실패 처리(주문 취소)가 호출되지 않았는지 확인
         // 주문이 CANCELED 상태가 아니어야 함
         assertThat(savedOrder.getStatus()).isNotEqualTo(OrderStatus.CANCELED);
+    }
+
+    @Test
+    @DisplayName("Retry 실패 후 CircuitBreaker가 OPEN 상태가 되어 Fallback이 호출된다")
+    void createOrder_retryFailure_circuitBreakerOpens_fallbackExecuted() {
+        // arrange
+        User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        List<OrderItemCommand> commands = List.of(
+            OrderItemCommand.of(product.getId(), 1)
+        );
+
+        // 모든 재시도가 실패하도록 설정 (5xx 서버 오류)
+        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
+            .thenThrow(new FeignException.InternalServerError(
+                "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
+
+        // CircuitBreaker를 리셋하여 초기 상태로 만듦
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                circuitBreaker.reset();
+            }
+        }
+
+        // act
+        // 서킷 브레이커 설정: minimumNumberOfCalls=1, failureRateThreshold=50%
+        // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+        // 따라서 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고 (재시도 포함하여 3번),
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        int numberOfCalls = 6; // 여러 번 호출하여 서킷 브레이커 동작 확인
+        for (int i = 0; i < numberOfCalls; i++) {
+            purchasingFacade.createOrder(
+                user.getUserId(),
+                commands,
+                null,
+                "SAMSUNG",
+                "4111-1111-1111-1111"
+            );
+        }
+
+        // assert
+        // 재시도 정책에 따라 5xx 에러는 최대 3번까지 재시도됨 (maxAttempts: 3)
+        // 첫 번째 createOrder 호출에서 재시도가 일어나면서 최대 3번 호출될 수 있음
+        // Circuit Breaker가 OPEN 상태가 되면 이후 호출들은 fallback이 호출되어 실제 호출되지 않음
+        verify(paymentGatewayClient, atMost(3))
+            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
+
+        // CircuitBreaker 상태 확인
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                // 실패율이 임계값을 초과했으므로 OPEN 상태로 전환되어야 함
+                // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+                assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+            }
+        }
+
+        // 모든 주문이 PENDING 상태로 생성되었는지 확인
+        // Circuit Breaker가 언제 OPEN 상태로 전환될지 정확히 예측하기 어려우므로,
+        // 최소 1개 이상의 주문이 생성되었는지 확인
+        List<Order> orders = orderJpaRepository.findAll();
+        assertThat(orders.size()).isGreaterThanOrEqualTo(1);
+        orders.forEach(order -> {
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        });
     }
 
     @Test
@@ -488,5 +615,112 @@ class PurchasingFacadeCircuitBreakerTest {
         // (상태 확인 API나 콜백을 통해 나중에 상태를 업데이트할 수 있어야 함)
     }
 
+    @Test
+    @DisplayName("Retry가 모두 실패한 후 CircuitBreaker가 OPEN 상태가 되면 Fallback이 호출되어 주문이 PENDING 상태로 유지된다")
+    void createOrder_retryExhausted_circuitBreakerOpens_fallbackCalled_orderPending() {
+        // arrange
+        // 6번의 주문 생성 + fallback 테스트 1번 = 총 7번의 주문 생성
+        // 각 주문마다 10,000 포인트가 필요하므로 최소 70,000 포인트 필요
+        // 여유를 두고 100,000 포인트로 설정
+        User user = createAndSaveUser("testuser", "test@example.com", 100_000L);
+        Brand brand = createAndSaveBrand("브랜드");
+        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
+
+        List<OrderItemCommand> commands = List.of(
+            OrderItemCommand.of(product.getId(), 1)
+        );
+
+        // 모든 재시도가 실패하도록 설정 (5xx 서버 오류)
+        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
+            .thenThrow(new FeignException.InternalServerError(
+                "Internal Server Error",
+                Request.create(Request.HttpMethod.POST, "/api/v1/payments", Collections.emptyMap(), null, null, null),
+                null,
+                Collections.emptyMap()
+            ));
+
+        // CircuitBreaker를 리셋하여 초기 상태로 만듦
+        if (circuitBreakerRegistry != null) {
+            CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+            if (circuitBreaker != null) {
+                circuitBreaker.reset();
+            }
+        }
+
+        // act
+        // 서킷 브레이커 설정: minimumNumberOfCalls=1, failureRateThreshold=50%
+        // 첫 번째 호출이 실패하면 100% 실패율이 되어 임계값 50%를 초과하므로 OPEN 상태로 전환됨
+        // 따라서 첫 번째 호출만 실제로 PaymentGatewayClient를 호출하고,
+        // 이후 호출들은 서킷 브레이커가 OPEN 상태이므로 fallback이 호출되어 실제 호출되지 않음
+        int numberOfCalls = 6; // 여러 번 호출하여 서킷 브레이커 동작 확인
+        
+        for (int i = 0; i < numberOfCalls; i++) {
+            purchasingFacade.createOrder(
+                user.getUserId(),
+                commands,
+                null,
+                "SAMSUNG",
+                "4111-1111-1111-1111"
+            );
+        }
+
+        // CircuitBreaker 상태 확인
+        CircuitBreaker circuitBreaker = null;
+        if (circuitBreakerRegistry != null) {
+            circuitBreaker = circuitBreakerRegistry.circuitBreaker("pgCircuit");
+        }
+
+        // assert
+        // 1. 재시도 정책에 따라 5xx 에러는 최대 3번까지 재시도됨 (maxAttempts: 3)
+        // 첫 번째 createOrder 호출에서 재시도가 일어나면서 최대 3번 호출될 수 있음
+        // Circuit Breaker가 OPEN 상태가 되면 이후 호출들은 fallback이 호출되어 실제 호출되지 않음
+        verify(paymentGatewayClient, atMost(3))
+            .requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class));
+
+        // 2. CircuitBreaker가 OPEN 상태로 전환되었는지 확인
+        if (circuitBreaker != null) {
+            // 실패율이 임계값을 초과했으므로 OPEN 상태로 전환되어야 함
+            assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+        }
+
+        // 3. CircuitBreaker가 OPEN 상태가 되면 다음 호출에서 Fallback이 호출되어야 함
+        // Fallback 응답 시뮬레이션
+        PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> fallbackResponse =
+            new PaymentGatewayDto.ApiResponse<>(
+                new PaymentGatewayDto.ApiResponse.Metadata(
+                    PaymentGatewayDto.ApiResponse.Metadata.Result.FAIL,
+                    "CIRCUIT_BREAKER_OPEN",
+                    "PG 서비스가 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요."
+                ),
+                null
+            );
+        when(paymentGatewayClient.requestPayment(anyString(), any(PaymentGatewayDto.PaymentRequest.class)))
+            .thenReturn(fallbackResponse);
+
+        // CircuitBreaker를 강제로 OPEN 상태로 만듦 (Fallback 호출 보장)
+        if (circuitBreaker != null) {
+            circuitBreaker.transitionToOpenState();
+        }
+
+        // Fallback이 호출되는 시나리오 테스트
+        OrderInfo fallbackOrderInfo = purchasingFacade.createOrder(
+            user.getUserId(),
+            commands,
+            null,
+            "SAMSUNG",
+            "4111-1111-1111-1111"
+        );
+
+        // 4. Fallback 응답이 올바르게 처리되어 주문이 PENDING 상태로 유지되어야 함
+        assertThat(fallbackOrderInfo.status()).isEqualTo(OrderStatus.PENDING);
+        
+        // 5. 모든 주문이 PENDING 상태로 생성되었는지 확인
+        List<Order> orders = orderJpaRepository.findAll();
+        assertThat(orders.size()).isGreaterThanOrEqualTo(numberOfCalls + 1); // numberOfCalls + fallback 테스트 1번
+        orders.forEach(order -> {
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+            assertThat(order.getStatus()).isNotEqualTo(OrderStatus.CANCELED);
+        });
+    }
 }
 

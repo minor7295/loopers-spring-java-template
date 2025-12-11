@@ -76,9 +76,6 @@ public class CouponService {
             // 사용자 쿠폰 저장 (version 체크 자동 수행)
             // 다른 트랜잭션이 먼저 수정했다면 OptimisticLockException 발생
             userCouponRepository.save(userCoupon);
-            // ✅ flush()를 명시적으로 호출하여 Optimistic Lock 체크를 즉시 수행
-            // flush() 없이는 트랜잭션 커밋 시점에 체크되므로, 여러 트랜잭션이 동시에 성공할 수 있음
-            userCouponRepository.flush();
         } catch (ObjectOptimisticLockingFailureException e) {
             // 낙관적 락 충돌: 다른 트랜잭션이 먼저 쿠폰을 사용함
             throw new CoreException(ErrorType.CONFLICT,

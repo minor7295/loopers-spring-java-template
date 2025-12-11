@@ -45,13 +45,5 @@ public class UserCouponRepositoryImpl implements UserCouponRepository {
     public Optional<UserCoupon> findByUserIdAndCouponCodeForUpdate(Long userId, String couponCode) {
         return userCouponJpaRepository.findByUserIdAndCouponCodeForUpdate(userId, couponCode);
     }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void flush() {
-        userCouponJpaRepository.flush();
-    }
 }
 

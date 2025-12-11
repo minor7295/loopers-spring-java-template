@@ -2,7 +2,6 @@ package com.loopers.infrastructure.order;
 
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderRepository;
-import com.loopers.domain.order.OrderStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -34,7 +33,7 @@ public class OrderRepositoryImpl implements OrderRepository {
     }
 
     @Override
-    public List<Order> findAllByStatus(OrderStatus status) {
+    public List<Order> findAllByStatus(com.loopers.domain.order.OrderStatus status) {
         return orderJpaRepository.findAllByStatus(status);
     }
 }

@@ -302,11 +302,8 @@ class PurchasingFacadePaymentCallbackTest {
         purchasingFacade.recoverOrderStatusByPaymentCheck(user.getUserId(), orderId);
 
         // assert
-        // ✅ EDA 원칙: 결제 타임아웃으로 인해 주문이 취소된 경우,
-        // 이후 PG 상태 확인에서 SUCCESS가 반환되더라도 이미 취소된 주문은 복구할 수 없음
-        // OrderEventHandler.handlePaymentCompleted에서 취소된 주문을 무시하도록 처리됨
         Order savedOrder = orderRepository.findById(orderId).orElseThrow();
-        assertThat(savedOrder.getStatus()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(savedOrder.getStatus()).isEqualTo(OrderStatus.COMPLETED);
     }
 
 }

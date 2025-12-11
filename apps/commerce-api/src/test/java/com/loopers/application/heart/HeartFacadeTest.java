@@ -1,6 +1,7 @@
 package com.loopers.application.heart;
 
 import com.loopers.application.like.LikeService;
+import com.loopers.application.product.ProductCacheService;
 import com.loopers.application.product.ProductService;
 import com.loopers.application.user.UserService;
 import com.loopers.domain.like.Like;
@@ -36,7 +37,10 @@ class HeartFacadeTest {
     private UserService userService;
     
     @Mock
-    private ProductService productService; // 조회용으로만 사용
+    private ProductService productService;
+    
+    @Mock
+    private ProductCacheService productCacheService;
 
     @InjectMocks
     private HeartFacade heartFacade;
@@ -62,10 +66,7 @@ class HeartFacadeTest {
         heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
-        // ✅ EDA 원칙: LikeService.save()가 LikeEvent.LikeAdded 이벤트를 발행
-        // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
         verify(likeService).save(any(Like.class));
-        // ProductService는 조회용으로만 사용되므로 검증하지 않음
     }
 
     @Test
@@ -81,8 +82,6 @@ class HeartFacadeTest {
         heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
 
         // assert
-        // ✅ EDA 원칙: LikeService.delete()가 LikeEvent.LikeRemoved 이벤트를 발행
-        // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
         verify(likeService).delete(like);
     }
 
@@ -132,23 +131,18 @@ class HeartFacadeTest {
     }
 
     @Test
-    @DisplayName("좋아요 등록 시 상품 존재 여부 검증은 제거됨 (이벤트 핸들러에서 처리)")
-    void addLike_productValidationRemoved() {
+    @DisplayName("상품을 찾을 수 없으면 예외를 던진다")
+    void addLike_productNotFound() {
         // arrange
         setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
-        Long productId = 999L;
-        // ✅ EDA 원칙: Product 존재 여부 검증은 제거됨
-        // 이벤트 핸들러에서 처리하거나 외래키 제약조건으로 보장
-        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, productId))
-            .thenReturn(Optional.empty());
+        Long nonExistentProductId = 999L;
+        when(productService.getProduct(nonExistentProductId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "상품을 찾을 수 없습니다."));
 
-        // act
-        heartFacade.addLike(DEFAULT_USER_ID, productId);
-
-        // assert
-        // ProductService.getProduct()는 호출되지 않음 (검증 제거됨)
-        verify(productService, never()).getProduct(any());
-        verify(likeService).save(any(Like.class));
+        // act & assert
+        assertThatThrownBy(() -> heartFacade.addLike(DEFAULT_USER_ID, nonExistentProductId))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
     }
 
     @Test
@@ -241,14 +235,18 @@ class HeartFacadeTest {
 
     private void setupMocks(String userId, Long userInternalId, Long productId) {
         setupMockUser(userId, userInternalId);
-        // ✅ EDA 원칙: ProductService는 조회용으로만 사용되므로 mock 설정 불필요
-        // Product 존재 여부 검증은 제거됨
+        setupMockProduct(productId);
     }
 
     private void setupMockUser(String userId, Long userInternalId) {
         User mockUser = mock(User.class);
         when(mockUser.getId()).thenReturn(userInternalId);
         when(userService.getUser(userId)).thenReturn(mockUser);
+    }
+
+    private void setupMockProduct(Long productId) {
+        Product mockProduct = mock(Product.class);
+        when(productService.getProduct(productId)).thenReturn(mockProduct);
     }
 
     private Product createMockProduct(Long productId, String name, Integer price, Integer stock, Long brandId, Long likeCount) {
