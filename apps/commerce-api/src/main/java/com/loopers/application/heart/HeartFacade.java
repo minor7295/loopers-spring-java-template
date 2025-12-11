@@ -1,7 +1,6 @@
 package com.loopers.application.heart;
 
 import com.loopers.application.like.LikeService;
-import com.loopers.application.product.ProductCacheService;
 import com.loopers.application.product.ProductService;
 import com.loopers.application.user.UserService;
 import com.loopers.domain.like.Like;
@@ -23,6 +22,14 @@ import java.util.stream.Collectors;
  * <p>
  * 좋아요 추가, 삭제, 목록 조회 유즈케이스를 처리하는 애플리케이션 서비스입니다.
  * </p>
+ * <p>
+ * <b>EDA 원칙 준수:</b>
+ * <ul>
+ *   <li><b>이벤트 기반:</b> Like 도메인 이벤트만 발행하고, 다른 애그리거트를 직접 수정하지 않음</li>
+ *   <li><b>느슨한 결합:</b> Product, User 애그리거트와의 직접적인 의존성 최소화</li>
+ *   <li><b>책임 분리:</b> 좋아요 도메인만 관리하고, 상품 좋아요 수 집계는 이벤트 핸들러에서 처리</li>
+ * </ul>
+ * </p>
  *
  * @author Loopers
  * @version 1.0
@@ -31,9 +38,8 @@ import java.util.stream.Collectors;
 @Component
 public class HeartFacade {
     private final LikeService likeService;
-    private final UserService userService;
-    private final ProductService productService;
-    private final ProductCacheService productCacheService;
+    private final UserService userService; // String userId를 Long id로 변환하는 데만 사용
+    private final ProductService productService; // getLikedProducts 조회용으로만 사용
 
     /**
      * 상품에 좋아요를 추가합니다.
@@ -57,14 +63,23 @@ public class HeartFacade {
      *   <li><b>비즈니스 데이터 보호:</b> 중복 좋아요로 인한 비즈니스 데이터 오염 방지</li>
      * </ul>
      * </p>
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>이벤트 기반:</b> LikeService.save()가 LikeEvent.LikeAdded 이벤트를 발행</li>
+     *   <li><b>느슨한 결합:</b> Product 애그리거트를 직접 조회/수정하지 않음. 이벤트 핸들러가 상품 좋아요 수를 업데이트</li>
+     *   <li><b>책임 분리:</b> 좋아요 도메인만 관리하고, 상품 좋아요 수 집계는 ProductEventHandler에서 처리</li>
+     * </ul>
+     * </p>
      *
      * @param userId 사용자 ID (String)
      * @param productId 상품 ID
-     * @throws CoreException 사용자 또는 상품을 찾을 수 없는 경우
+     * @throws CoreException 사용자를 찾을 수 없는 경우
      */
     public void addLike(String userId, Long productId) {
+        // ✅ EDA 원칙: UserService는 String userId를 Long id로 변환하는 데만 사용
+        // Product 존재 여부 검증은 제거 (이벤트 핸들러에서 처리하거나, 외래키 제약조건으로 보장)
         User user = loadUser(userId);
-        loadProduct(productId);
 
         // 먼저 일반 조회로 중복 체크 (대부분의 경우 빠르게 처리)
         // ⚠️ 주의: 애플리케이션 레벨 체크만으로는 race condition을 완전히 방지할 수 없음
@@ -76,18 +91,16 @@ public class HeartFacade {
 
         // 저장 시도 (동시성 상황에서는 UNIQUE 제약조건 위반 예외 발생 가능)
         // ✅ UNIQUE 제약조건이 최종 보호: DB 레벨에서 중복 삽입을 물리적으로 방지
-        // @Transactional이 없어도 save() 호출 시 자동 트랜잭션으로 예외를 catch할 수 있음
+        // ✅ LikeService.save()가 LikeEvent.LikeAdded 이벤트를 발행
+        // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
         Like like = Like.of(user.getId(), productId);
         try {
             likeService.save(like);
-            // 좋아요 추가 성공 시 로컬 캐시의 델타 증가
-            productCacheService.incrementLikeCountDelta(productId);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             // UNIQUE 제약조건 위반 = 이미 저장됨 (멱등성 보장)
             // 동시에 여러 요청이 들어와서 모두 "없음"으로 판단하고 저장을 시도할 때,
             // 첫 번째만 성공하고 나머지는 UNIQUE 제약조건 위반 예외 발생
             // 이미 좋아요가 존재하는 경우이므로 정상 처리로 간주
-            // 로컬 캐시는 업데이트하지 않음 (이미 좋아요가 존재하므로)
         }
     }
 
@@ -96,14 +109,23 @@ public class HeartFacade {
      * <p>
      * 멱등성을 보장합니다. 좋아요가 존재하지 않는 경우 아무 작업도 수행하지 않습니다.
      * </p>
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>이벤트 기반:</b> LikeService.delete()가 LikeEvent.LikeRemoved 이벤트를 발행</li>
+     *   <li><b>느슨한 결합:</b> Product 애그리거트를 직접 조회/수정하지 않음. 이벤트 핸들러가 상품 좋아요 수를 업데이트</li>
+     *   <li><b>책임 분리:</b> 좋아요 도메인만 관리하고, 상품 좋아요 수 집계는 ProductEventHandler에서 처리</li>
+     * </ul>
+     * </p>
      *
      * @param userId 사용자 ID (String)
      * @param productId 상품 ID
-     * @throws CoreException 사용자 또는 상품을 찾을 수 없는 경우
+     * @throws CoreException 사용자를 찾을 수 없는 경우
      */
     public void removeLike(String userId, Long productId) {
+        // ✅ EDA 원칙: UserService는 String userId를 Long id로 변환하는 데만 사용
+        // Product 존재 여부 검증은 제거 (이벤트 핸들러에서 처리하거나, 외래키 제약조건으로 보장)
         User user = loadUser(userId);
-        loadProduct(productId);
 
         Optional<Like> like = likeService.getLike(user.getId(), productId);
         if (like.isEmpty()) {
@@ -111,13 +133,12 @@ public class HeartFacade {
         }
 
         try {
+            // ✅ LikeService.delete()가 LikeEvent.LikeRemoved 이벤트를 발행
+            // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
             likeService.delete(like.get());
-            // 좋아요 취소 성공 시 로컬 캐시의 델타 감소
-            productCacheService.decrementLikeCountDelta(productId);
         } catch (Exception e) {
             // 동시성 상황에서 이미 삭제된 경우 등 예외 발생 가능
             // 멱등성 보장: 이미 삭제된 경우 정상 처리로 간주
-            // 로컬 캐시는 업데이트하지 않음 (이미 삭제되었으므로)
         }
     }
 
@@ -129,9 +150,16 @@ public class HeartFacade {
      * <p>
      * <b>좋아요 수 조회 전략:</b>
      * <ul>
-     *   <li><b>비동기 집계:</b> Product.likeCount 필드 사용 (스케줄러로 주기적 동기화)</li>
-     *   <li><b>Eventually Consistent:</b> 약간의 지연 허용 (최대 5초)</li>
+     *   <li><b>이벤트 기반 집계:</b> Product.likeCount 필드 사용 (LikeEvent로 실시간 업데이트)</li>
+     *   <li><b>Strong Consistency:</b> 이벤트 기반으로 실시간 반영</li>
      *   <li><b>성능 최적화:</b> COUNT(*) 쿼리 없이 컬럼만 읽으면 됨</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>조회 특성:</b> 조회 쿼리는 이벤트로 처리하기 어려우므로 ProductService 의존 허용</li>
+     *   <li><b>최소 의존:</b> 조회용으로만 사용하며, 수정 작업은 수행하지 않음</li>
      * </ul>
      * </p>
      *
@@ -156,6 +184,7 @@ public class HeartFacade {
             .toList();
 
         // ✅ 배치 조회로 N+1 쿼리 문제 해결
+        // ⚠️ 조회 특성상 ProductService 의존은 허용 (이벤트로 처리하기 어려움)
         Map<Long, Product> productMap = productService.getProducts(productIds).stream()
             .collect(Collectors.toMap(Product::getId, product -> product));
 
@@ -165,7 +194,7 @@ public class HeartFacade {
         }
 
         // 좋아요 목록을 상품 정보와 좋아요 수와 함께 변환
-        // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+        // ✅ Product.likeCount 필드 사용 (이벤트 기반 실시간 집계된 값)
         return likes.stream()
             .map(like -> {
                 Product product = productMap.get(like.getProductId());
@@ -179,12 +208,18 @@ public class HeartFacade {
             .toList();
     }
 
+    /**
+     * String userId를 Long id로 변환합니다.
+     * <p>
+     * EDA 원칙에 따라 최소한의 UserService 의존만 사용합니다.
+     * </p>
+     *
+     * @param userId 사용자 ID (String)
+     * @return 사용자 엔티티
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
     private User loadUser(String userId) {
         return userService.getUser(userId);
-    }
-
-    private Product loadProduct(Long productId) {
-        return productService.getProduct(productId);
     }
 
     /**
@@ -225,7 +260,7 @@ public class HeartFacade {
                 product.getPrice(),
                 product.getStock(),
                 product.getBrandId(),
-                product.getLikeCount() // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+                product.getLikeCount() // ✅ Product.likeCount 필드 사용 (이벤트 기반 실시간 집계된 값)
             );
         }
     }

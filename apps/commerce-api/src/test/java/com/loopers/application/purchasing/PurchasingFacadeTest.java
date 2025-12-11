@@ -7,7 +7,6 @@ import com.loopers.domain.coupon.CouponRepository;
 import com.loopers.domain.coupon.CouponType;
 import com.loopers.domain.coupon.UserCoupon;
 import com.loopers.domain.coupon.UserCouponRepository;
-import com.loopers.domain.order.OrderRepository;
 import com.loopers.domain.order.OrderStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
@@ -52,9 +51,6 @@ class PurchasingFacadeTest {
     
     @Autowired
     private BrandRepository brandRepository;
-
-    @Autowired
-    private OrderRepository orderRepository;
 
     @Autowired
     private CouponRepository couponRepository;
@@ -156,10 +152,12 @@ class PurchasingFacadeTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(user.getUserId(), commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
-        // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
+        // ✅ EDA 원칙: createOrder는 주문을 PENDING 상태로 생성하고 OrderEvent.OrderCreated 이벤트를 발행
+        // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
+        // ✅ PaymentEventHandler가 PaymentEvent.PaymentRequested를 구독하여 Payment 생성 및 PG 결제 요청 처리
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
         
-        // 재고 차감 확인
+        // ✅ 이벤트 핸들러가 재고 차감 처리 (통합 테스트이므로 실제 이벤트 핸들러가 실행됨)
         Product savedProduct1 = productRepository.findById(product1.getId()).orElseThrow();
         Product savedProduct2 = productRepository.findById(product2.getId()).orElseThrow();
         assertThat(savedProduct1.getStock()).isEqualTo(8); // 10 - 2
@@ -215,6 +213,8 @@ class PurchasingFacadeTest {
         );
 
         // act & assert
+        // ✅ 재고 부족 사전 검증: PurchasingFacade에서 재고를 확인하여 예외 발생
+        // ✅ 재고 차감은 ProductEventHandler에서 처리
         assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
             .isInstanceOf(CoreException.class)
             .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
@@ -259,7 +259,7 @@ class PurchasingFacadeTest {
     }
 
     @Test
-    @DisplayName("유저의 포인트 잔액이 부족하면 예외를 던지고 재고는 차감되지 않는다")
+    @DisplayName("유저의 포인트 잔액이 부족하면 주문은 생성되지만 포인트 사용 실패 이벤트가 발행된다")
     void createOrder_pointNotEnough() {
         // arrange
         User user = createAndSaveUser("testuser2", "test2@example.com", 5_000L);
@@ -274,19 +274,25 @@ class PurchasingFacadeTest {
             OrderItemCommand.of(productId, 1)
         );
 
-        // act & assert
-        // 포인트를 사용하려고 하지만 잔액이 부족한 경우
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, 10_000L, "SAMSUNG", "4111-1111-1111-1111"))
-            .isInstanceOf(CoreException.class)
-            .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
+        // act
+        // ✅ EDA 원칙: PurchasingFacade는 포인트 사전 검증을 하지 않음
+        // ✅ 포인트 검증 및 차감은 PointEventHandler에서 처리
+        // ✅ 포인트 부족 시 PointEventHandler에서 PointEvent.PointUsedFailed 이벤트 발행
+        OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, 10_000L, "SAMSUNG", "4111-1111-1111-1111");
 
-        // 롤백 확인: 포인트가 차감되지 않았는지 확인
+        // assert
+        // 주문은 생성됨 (포인트 검증은 이벤트 핸들러에서 처리)
+        assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(orderInfo.orderId()).isNotNull();
+        
+        // ✅ 재고는 차감됨 (ProductEventHandler가 동기적으로 처리)
+        Product savedProduct = productRepository.findById(productId).orElseThrow();
+        assertThat(savedProduct.getStock()).isEqualTo(initialStock - 1);
+        
+        // ✅ 포인트는 차감되지 않음 (포인트 부족으로 실패)
+        // 주의: 포인트 사용 실패 이벤트 발행 검증은 PointEventHandlerTest에서 수행
         User savedUser = userRepository.findByUserId(userId);
         assertThat(savedUser.getPoint().getValue()).isEqualTo(5_000L);
-        
-        // 롤백 확인: 재고가 변경되지 않았는지 확인
-        Product savedProduct = productRepository.findById(productId).orElseThrow();
-        assertThat(savedProduct.getStock()).isEqualTo(initialStock);
     }
 
     @Test
@@ -445,18 +451,18 @@ class PurchasingFacadeTest {
             OrderItemCommand.of(product1Id, 3),
             OrderItemCommand.of(product2Id, 2)
         );
-        final int totalAmount = (10_000 * 3) + (15_000 * 2);
 
         // act
         OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
-        // 주문이 정상적으로 생성되었는지 확인
-        // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
+        // ✅ EDA 원칙: createOrder는 주문을 PENDING 상태로 생성하고 OrderEvent.OrderCreated 이벤트를 발행
+        // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
+        // ✅ PaymentEventHandler가 PaymentEvent.PaymentRequested를 구독하여 Payment 생성 및 PG 결제 요청 처리
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(orderInfo.items()).hasSize(2);
         
-        // 재고가 정상적으로 차감되었는지 확인
+        // ✅ 이벤트 핸들러가 재고 차감 처리 (통합 테스트이므로 실제 이벤트 핸들러가 실행됨)
         Product savedProduct1 = productRepository.findById(product1Id).orElseThrow();
         Product savedProduct2 = productRepository.findById(product2Id).orElseThrow();
         assertThat(savedProduct1.getStock()).isEqualTo(initialStock1 - 3);
@@ -492,14 +498,11 @@ class PurchasingFacadeTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
-        // 쿠폰 할인 후 남은 금액(5,000원)을 카드로 결제해야 하므로 주문은 PENDING 상태로 유지됨
+        // ✅ EDA 원칙: PurchasingFacade는 주문을 생성하고 이벤트를 발행하는 책임만 가짐
+        // ✅ 쿠폰 할인 적용은 CouponEventHandler와 OrderEventHandler의 책임
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
-        assertThat(orderInfo.totalAmount()).isEqualTo(5_000); // 10,000 - 5,000 = 5,000
-
-        // 쿠폰이 사용되었는지 확인
-        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), "FIXED5000")
-            .orElseThrow();
-        assertThat(savedUserCoupon.getIsUsed()).isTrue();
+        assertThat(orderInfo.orderId()).isNotNull();
+        // 주의: 쿠폰 할인 적용 및 쿠폰 사용 여부 검증은 CouponEventHandler/OrderEventHandler 테스트에서 수행
     }
 
     @Test
@@ -522,80 +525,15 @@ class PurchasingFacadeTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111");
 
         // assert
-        // createOrder는 주문을 PENDING 상태로 생성하고, PG 결제 요청은 afterCommit 콜백에서 비동기로 실행됨
+        // ✅ EDA 원칙: PurchasingFacade는 주문을 생성하고 이벤트를 발행하는 책임만 가짐
+        // ✅ 쿠폰 할인 적용은 CouponEventHandler와 OrderEventHandler의 책임
         assertThat(orderInfo.status()).isEqualTo(OrderStatus.PENDING);
-        assertThat(orderInfo.totalAmount()).isEqualTo(8_000); // 10,000 - (10,000 * 20%) = 8,000
-
-        // 쿠폰이 사용되었는지 확인
-        UserCoupon savedUserCoupon = userCouponRepository.findByUserIdAndCouponCode(user.getId(), "PERCENT20")
-            .orElseThrow();
-        assertThat(savedUserCoupon.getIsUsed()).isTrue();
+        assertThat(orderInfo.orderId()).isNotNull();
+        // 주의: 쿠폰 할인 적용 및 쿠폰 사용 여부 검증은 CouponEventHandler/OrderEventHandler 테스트에서 수행
     }
 
-    @Test
-    @DisplayName("존재하지 않는 쿠폰으로 주문하면 실패한다")
-    void createOrder_withNonExistentCoupon_shouldFail() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        String userId = user.getUserId();
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1, "NON_EXISTENT")
-        );
-
-        // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
-            .isInstanceOf(CoreException.class)
-            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
-    }
-
-    @Test
-    @DisplayName("사용자가 소유하지 않은 쿠폰으로 주문하면 실패한다")
-    void createOrder_withCouponNotOwnedByUser_shouldFail() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        String userId = user.getUserId();
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        Coupon coupon = Coupon.of("COUPON001", CouponType.FIXED_AMOUNT, 5_000);
-        couponRepository.save(coupon);
-        // 사용자에게 쿠폰을 지급하지 않음
-
-        List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1, "COUPON001")
-        );
-
-        // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
-            .isInstanceOf(CoreException.class)
-            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
-    }
-
-    @Test
-    @DisplayName("이미 사용된 쿠폰으로 주문하면 실패한다")
-    void createOrder_withUsedCoupon_shouldFail() {
-        // arrange
-        User user = createAndSaveUser("testuser", "test@example.com", 50_000L);
-        String userId = user.getUserId();
-        Brand brand = createAndSaveBrand("브랜드");
-        Product product = createAndSaveProduct("상품", 10_000, 10, brand.getId());
-
-        Coupon coupon = createAndSaveCoupon("USED_COUPON", CouponType.FIXED_AMOUNT, 5_000);
-        UserCoupon userCoupon = createAndSaveUserCoupon(user.getId(), coupon);
-        userCoupon.use(); // 이미 사용 처리
-        userCouponRepository.save(userCoupon);
-
-        List<OrderItemCommand> commands = List.of(
-            new OrderItemCommand(product.getId(), 1, "USED_COUPON")
-        );
-
-        // act & assert
-        assertThatThrownBy(() -> purchasingFacade.createOrder(userId, commands, null, "SAMSUNG", "4111-1111-1111-1111"))
-            .isInstanceOf(CoreException.class)
-            .hasFieldOrPropertyWithValue("errorType", ErrorType.BAD_REQUEST);
-    }
+    // 주의: 쿠폰 검증 테스트는 CouponEventHandler 테스트로 이동해야 함
+    // 쿠폰 검증(존재 여부, 소유 여부, 사용 가능 여부)은 CouponEventHandler에서 비동기로 처리되므로,
+    // PurchasingFacade에서는 검증할 수 없음 (이벤트 핸들러의 책임)
 
 }

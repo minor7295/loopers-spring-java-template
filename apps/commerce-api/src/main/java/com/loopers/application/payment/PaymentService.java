@@ -31,6 +31,7 @@ public class PaymentService {
 
     private final PaymentRepository paymentRepository;
     private final PaymentGateway paymentGateway;
+    private final PaymentEventPublisher paymentEventPublisher;
     
     @Value("${payment.callback.base-url}")
     private String callbackBaseUrl;
@@ -114,35 +115,57 @@ public class PaymentService {
      * 결제를 SUCCESS 상태로 전이합니다.
      * <p>
      * 멱등성 보장: 이미 SUCCESS 상태인 경우 아무 작업도 하지 않습니다.
+     * 결제 완료 후 PaymentCompleted 이벤트를 발행합니다.
      * </p>
      *
      * @param paymentId 결제 ID
      * @param completedAt PG 완료 시각
+     * @param transactionKey 트랜잭션 키 (null 가능)
      * @throws CoreException 결제를 찾을 수 없는 경우
      */
     @Transactional
-    public void toSuccess(Long paymentId, LocalDateTime completedAt) {
+    public void toSuccess(Long paymentId, LocalDateTime completedAt, String transactionKey) {
         Payment payment = getPayment(paymentId);
+        
+        // 이미 SUCCESS 상태인 경우 이벤트 발행하지 않음 (멱등성)
+        if (payment.isCompleted()) {
+            return;
+        }
+        
         payment.toSuccess(completedAt); // Entity에 위임
-        paymentRepository.save(payment);
+        Payment savedPayment = paymentRepository.save(payment);
+        
+        // ✅ 도메인 이벤트 발행: 결제가 완료되었음 (과거 사실)
+        paymentEventPublisher.publish(PaymentEvent.PaymentCompleted.from(savedPayment, transactionKey));
     }
 
     /**
      * 결제를 FAILED 상태로 전이합니다.
      * <p>
      * 멱등성 보장: 이미 FAILED 상태인 경우 아무 작업도 하지 않습니다.
+     * 결제 실패 후 PaymentFailed 이벤트를 발행합니다.
      * </p>
      *
      * @param paymentId 결제 ID
      * @param failureReason 실패 사유
      * @param completedAt PG 완료 시각
+     * @param transactionKey 트랜잭션 키 (null 가능)
      * @throws CoreException 결제를 찾을 수 없는 경우
      */
     @Transactional
-    public void toFailed(Long paymentId, String failureReason, LocalDateTime completedAt) {
+    public void toFailed(Long paymentId, String failureReason, LocalDateTime completedAt, String transactionKey) {
         Payment payment = getPayment(paymentId);
+        
+        // 이미 FAILED 상태인 경우 이벤트 발행하지 않음 (멱등성)
+        if (payment.getStatus() == PaymentStatus.FAILED) {
+            return;
+        }
+        
         payment.toFailed(failureReason, completedAt); // Entity에 위임
-        paymentRepository.save(payment);
+        Payment savedPayment = paymentRepository.save(payment);
+        
+        // ✅ 도메인 이벤트 발행: 결제가 실패했음 (과거 사실)
+        paymentEventPublisher.publish(PaymentEvent.PaymentFailed.from(savedPayment, failureReason, transactionKey));
     }
 
     /**
@@ -250,7 +273,7 @@ public class PaymentService {
             PaymentFailureType failureType = PaymentFailureType.classify(failure.errorCode());
             if (failureType == PaymentFailureType.BUSINESS_FAILURE) {
                 // 비즈니스 실패: 결제 상태를 FAILED로 변경
-                toFailed(payment.getId(), failure.message(), LocalDateTime.now());
+                toFailed(payment.getId(), failure.message(), LocalDateTime.now(), null);
             }
             // 외부 시스템 장애는 PENDING 상태 유지
             log.warn("PG 결제 요청 실패. (orderId: {}, errorCode: {}, message: {})",
@@ -292,10 +315,10 @@ public class PaymentService {
         Payment payment = paymentOpt.get();
         
         if (status == PaymentStatus.SUCCESS) {
-            toSuccess(payment.getId(), LocalDateTime.now());
+            toSuccess(payment.getId(), LocalDateTime.now(), transactionKey);
             log.info("결제 콜백 처리 완료: SUCCESS. (orderId: {}, transactionKey: {})", orderId, transactionKey);
         } else if (status == PaymentStatus.FAILED) {
-            toFailed(payment.getId(), reason != null ? reason : "결제 실패", LocalDateTime.now());
+            toFailed(payment.getId(), reason != null ? reason : "결제 실패", LocalDateTime.now(), transactionKey);
             log.warn("결제 콜백 처리 완료: FAILED. (orderId: {}, transactionKey: {}, reason: {})",
                 orderId, transactionKey, reason);
         } else {
@@ -333,10 +356,10 @@ public class PaymentService {
             Payment payment = paymentOpt.get();
             
             if (status == PaymentStatus.SUCCESS) {
-                toSuccess(payment.getId(), LocalDateTime.now());
+                toSuccess(payment.getId(), LocalDateTime.now(), null);
                 log.info("타임아웃 후 상태 확인 완료: SUCCESS. (orderId: {})", orderId);
             } else if (status == PaymentStatus.FAILED) {
-                toFailed(payment.getId(), "타임아웃 후 상태 확인 실패", LocalDateTime.now());
+                toFailed(payment.getId(), "타임아웃 후 상태 확인 실패", LocalDateTime.now(), null);
                 log.warn("타임아웃 후 상태 확인 완료: FAILED. (orderId: {})", orderId);
             } else {
                 // PENDING 상태: 상태 유지
