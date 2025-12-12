@@ -267,15 +267,20 @@ public class OrderService {
     /**
      * 결제 상태에 따라 주문 상태를 업데이트합니다.
      * <p>
+     * 주문 상태 변경 후 해당 이벤트(OrderCompleted 또는 OrderCanceled)를 발행합니다.
+     * </p>
+     * <p>
      * 도메인 로직만 처리합니다. 사용자 조회, 트랜잭션 관리, 로깅은 애플리케이션 레이어에서 처리합니다.
      * </p>
      *
      * @param order 주문 엔티티
      * @param paymentStatus 결제 상태
+     * @param reason 취소 사유 (FAILED인 경우 필수, 그 외 null 가능)
+     * @param refundPointAmount 환불할 포인트 금액 (FAILED인 경우 필수, 그 외 null 가능)
      * @throws CoreException 주문이 null이거나 이미 완료/취소된 경우
      */
     @Transactional
-    public void updateStatusByPaymentResult(Order order, PaymentStatus paymentStatus) {
+    public void updateStatusByPaymentResult(Order order, PaymentStatus paymentStatus, String reason, Long refundPointAmount) {
         if (order == null) {
             throw new CoreException(ErrorType.BAD_REQUEST, "주문 정보는 필수입니다.");
         }
@@ -288,11 +293,24 @@ public class OrderService {
         if (paymentStatus == PaymentStatus.SUCCESS) {
             // 결제 성공: 주문 완료
             order.complete();
-            orderRepository.save(order);
+            Order savedOrder = orderRepository.save(order);
+            
+            // ✅ 도메인 이벤트 발행: 주문이 완료되었음 (과거 사실)
+            orderEventPublisher.publish(OrderEvent.OrderCompleted.from(savedOrder));
         } else if (paymentStatus == PaymentStatus.FAILED) {
-            // 결제 실패: 주문 취소 (재고 원복 및 포인트 환불은 애플리케이션 레이어에서 처리)
+            // 결제 실패: 주문 취소 (재고 원복 및 포인트 환불은 이벤트 핸들러에서 처리)
+            if (reason == null || reason.isBlank()) {
+                throw new CoreException(ErrorType.BAD_REQUEST, "결제 실패 시 취소 사유는 필수입니다.");
+            }
+            if (refundPointAmount == null || refundPointAmount < 0) {
+                throw new CoreException(ErrorType.BAD_REQUEST, "환불할 포인트 금액은 0 이상이어야 합니다.");
+            }
+            
             order.cancel();
-            orderRepository.save(order);
+            Order savedOrder = orderRepository.save(order);
+            
+            // ✅ 도메인 이벤트 발행: 주문이 취소되었음 (과거 사실)
+            orderEventPublisher.publish(OrderEvent.OrderCanceled.from(savedOrder, reason, refundPointAmount));
         }
         // PENDING 상태: 상태 유지 (아무 작업도 하지 않음)
     }

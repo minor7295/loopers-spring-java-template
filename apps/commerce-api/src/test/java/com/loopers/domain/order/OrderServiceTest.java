@@ -1,6 +1,7 @@
 package com.loopers.domain.order;
 
 import com.loopers.application.order.OrderService;
+import com.loopers.domain.order.OrderEvent;
 import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.user.Gender;
@@ -352,10 +353,11 @@ public class OrderServiceTest {
             when(orderRepository.save(any(Order.class))).thenReturn(order);
 
             // act
-            orderService.updateStatusByPaymentResult(order, PaymentStatus.SUCCESS);
+            orderService.updateStatusByPaymentResult(order, PaymentStatus.SUCCESS, null, null);
 
             // assert
             verify(orderRepository, times(1)).save(order);
+            verify(orderEventPublisher, times(1)).publish(any(OrderEvent.OrderCompleted.class));
             // 상태 변경 검증은 OrderTest에서 이미 검증했으므로 제거
         }
 
@@ -368,12 +370,15 @@ public class OrderServiceTest {
                 OrderTestFixture.ValidOrderItem.createMultipleItems()
             );
             when(orderRepository.save(any(Order.class))).thenReturn(order);
+            String reason = "결제 실패";
+            Long refundPointAmount = 0L;
 
             // act
-            orderService.updateStatusByPaymentResult(order, PaymentStatus.FAILED);
+            orderService.updateStatusByPaymentResult(order, PaymentStatus.FAILED, reason, refundPointAmount);
 
             // assert
             verify(orderRepository, times(1)).save(order);
+            verify(orderEventPublisher, times(1)).publish(any(OrderEvent.OrderCanceled.class));
             // 상태 변경 검증은 OrderTest에서 이미 검증했으므로 제거
         }
 
@@ -387,10 +392,12 @@ public class OrderServiceTest {
             );
 
             // act
-            orderService.updateStatusByPaymentResult(order, PaymentStatus.PENDING);
+            orderService.updateStatusByPaymentResult(order, PaymentStatus.PENDING, null, null);
 
             // assert
             verify(orderRepository, never()).save(any(Order.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCompleted.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCanceled.class));
         }
 
         @DisplayName("이미 완료된 주문은 처리하지 않는다.")
@@ -404,10 +411,12 @@ public class OrderServiceTest {
             order.complete(); // 이미 완료 상태
 
             // act
-            orderService.updateStatusByPaymentResult(order, PaymentStatus.SUCCESS);
+            orderService.updateStatusByPaymentResult(order, PaymentStatus.SUCCESS, null, null);
 
             // assert
             verify(orderRepository, never()).save(any(Order.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCompleted.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCanceled.class));
         }
 
         @DisplayName("이미 취소된 주문은 처리하지 않는다.")
@@ -421,10 +430,12 @@ public class OrderServiceTest {
             order.cancel(); // 이미 취소 상태
 
             // act
-            orderService.updateStatusByPaymentResult(order, PaymentStatus.FAILED);
+            orderService.updateStatusByPaymentResult(order, PaymentStatus.FAILED, "결제 실패", 0L);
 
             // assert
             verify(orderRepository, never()).save(any(Order.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCompleted.class));
+            verify(orderEventPublisher, never()).publish(any(OrderEvent.OrderCanceled.class));
         }
 
         @DisplayName("주문이 null이면 예외가 발생한다.")
@@ -432,7 +443,7 @@ public class OrderServiceTest {
         void throwsException_whenOrderIsNull() {
             // act
             CoreException result = assertThrows(CoreException.class, () -> {
-                orderService.updateStatusByPaymentResult(null, PaymentStatus.SUCCESS);
+                orderService.updateStatusByPaymentResult(null, PaymentStatus.SUCCESS, null, null);
             });
 
             // assert

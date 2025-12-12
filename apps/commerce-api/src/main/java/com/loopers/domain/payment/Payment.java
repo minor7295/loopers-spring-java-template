@@ -22,6 +22,9 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
     name = "payment",
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_payment_order_id", columnNames = "ref_order_id")
+    },
     indexes = {
         @Index(name = "idx_payment_order_id", columnList = "ref_order_id"),
         @Index(name = "idx_payment_user_id", columnList = "ref_user_id"),
@@ -263,6 +266,61 @@ public class Payment extends BaseEntity {
      */
     public boolean isFailed() {
         return status == PaymentStatus.FAILED;
+    }
+
+    /**
+     * 쿠폰 할인 금액을 적용하여 결제 금액을 업데이트합니다.
+     * <p>
+     * 쿠폰 할인이 적용된 후 Order의 totalAmount가 업데이트되면,
+     * Payment의 totalAmount도 동기화하기 위해 호출됩니다.
+     * </p>
+     * <p>
+     * <b>주의사항:</b>
+     * <ul>
+     *   <li>이미 완료된 결제에는 할인을 적용할 수 없습니다.</li>
+     *   <li>할인 금액이 totalAmount를 초과할 수 없습니다.</li>
+     *   <li>paidAmount는 자동으로 재계산됩니다.</li>
+     * </ul>
+     * </p>
+     *
+     * @param discountAmount 할인 금액
+     * @throws CoreException 결제가 완료되었거나 할인 금액이 유효하지 않은 경우
+     */
+    public void applyCouponDiscount(Integer discountAmount) {
+        if (discountAmount == null || discountAmount < 0) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "할인 금액은 0 이상이어야 합니다.");
+        }
+        
+        // 이미 완료된 결제에는 할인을 적용할 수 없음
+        if (isCompleted()) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "이미 완료된 결제에는 할인을 적용할 수 없습니다.");
+        }
+        
+        // 할인 금액이 totalAmount를 초과할 수 없음
+        if (discountAmount > totalAmount) {
+            throw new CoreException(ErrorType.BAD_REQUEST,
+                String.format("할인 금액(%d)이 결제 금액(%d)을 초과할 수 없습니다.", discountAmount, totalAmount));
+        }
+        
+        // totalAmount에서 할인 금액 차감
+        Long newTotalAmount = totalAmount - discountAmount;
+        if (newTotalAmount < 0) {
+            newTotalAmount = 0L;
+        }
+        
+        this.totalAmount = newTotalAmount;
+        
+        // paidAmount 재계산 (totalAmount - usedPoint)
+        Long newPaidAmount = newTotalAmount - usedPoint;
+        if (newPaidAmount < 0) {
+            newPaidAmount = 0L;
+        }
+        this.paidAmount = newPaidAmount;
+        
+        // paidAmount가 0이 되면 자동으로 완료 처리
+        if (newPaidAmount == 0L && status == PaymentStatus.PENDING) {
+            this.status = PaymentStatus.SUCCESS;
+        }
     }
 
     private static void validateOrderId(Long orderId) {

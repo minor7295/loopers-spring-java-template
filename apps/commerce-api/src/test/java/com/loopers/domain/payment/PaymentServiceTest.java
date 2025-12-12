@@ -1,7 +1,7 @@
 package com.loopers.domain.payment;
 
 import com.loopers.application.payment.PaymentService;
-import com.loopers.application.payment.PaymentRequestCommand;
+import com.loopers.domain.payment.PaymentRequest;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import org.junit.jupiter.api.BeforeEach;
@@ -270,7 +270,7 @@ public class PaymentServiceTest {
             PaymentRequestResult.Success successResult = new PaymentRequestResult.Success("TXN123456");
             
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
-            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(successResult);
+            when(paymentGateway.requestPayment(any(PaymentRequest.class))).thenReturn(successResult);
             
             // act
             PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
@@ -279,7 +279,7 @@ public class PaymentServiceTest {
             assertThat(result).isInstanceOf(PaymentRequestResult.Success.class);
             assertThat(((PaymentRequestResult.Success) result).transactionKey()).isEqualTo("TXN123456");
             verify(paymentRepository, times(1)).save(any(Payment.class));
-            verify(paymentGateway, times(1)).requestPayment(any(PaymentRequestCommand.class));
+            verify(paymentGateway, times(1)).requestPayment(any(PaymentRequest.class));
         }
         
         @DisplayName("비즈니스 실패 시 결제 상태를 FAILED로 변경한다.")
@@ -310,7 +310,7 @@ public class PaymentServiceTest {
             );
             
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
-            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
+            when(paymentGateway.requestPayment(any(PaymentRequest.class))).thenReturn(failureResult);
             when(paymentRepository.findById(anyLong())).thenReturn(Optional.of(payment));
             
             // act
@@ -349,7 +349,7 @@ public class PaymentServiceTest {
             );
             
             when(paymentRepository.save(any(Payment.class))).thenReturn(payment);
-            when(paymentGateway.requestPayment(any(PaymentRequestCommand.class))).thenReturn(failureResult);
+            when(paymentGateway.requestPayment(any(PaymentRequest.class))).thenReturn(failureResult);
             
             // act
             PaymentRequestResult result = paymentService.requestPayment(orderId, userId, userEntityId, cardType, cardNo, amount);
@@ -378,7 +378,7 @@ public class PaymentServiceTest {
             
             assertThat(result.getErrorType()).isEqualTo(ErrorType.BAD_REQUEST);
             verify(paymentRepository, never()).save(any(Payment.class));
-            verify(paymentGateway, never()).requestPayment(any(PaymentRequestCommand.class));
+            verify(paymentGateway, never()).requestPayment(any(PaymentRequest.class));
         }
         
         @DisplayName("잘못된 카드 타입으로 인해 예외가 발생한다.")
@@ -399,7 +399,7 @@ public class PaymentServiceTest {
             
             assertThat(result.getErrorType()).isEqualTo(ErrorType.BAD_REQUEST);
             verify(paymentRepository, never()).save(any(Payment.class));
-            verify(paymentGateway, never()).requestPayment(any(PaymentRequestCommand.class));
+            verify(paymentGateway, never()).requestPayment(any(PaymentRequest.class));
         }
     }
     

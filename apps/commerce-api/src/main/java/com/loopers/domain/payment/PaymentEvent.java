@@ -184,5 +184,83 @@ public class PaymentEvent {
                     LocalDateTime.now()
             );
         }
+
+        /**
+         * 마스킹된 카드 번호를 반환합니다.
+         * <p>
+         * PII 보호를 위해 카드 번호의 중간 부분을 마스킹합니다.
+         * 마지막 4자리만 표시하고 나머지는 *로 마스킹합니다.
+         * 예: "4111-1234-5678-9010" -> "****-****-****-9010"
+         *     "4111123456789010" -> "************9010"
+         * </p>
+         *
+         * @return 마스킹된 카드 번호 (cardNo가 null이거나 비어있으면 null 반환)
+         */
+        public String maskedCardNo() {
+            if (cardNo == null || cardNo.isBlank()) {
+                return null;
+            }
+
+            // 숫자만 추출
+            String digitsOnly = cardNo.replaceAll("[^0-9]", "");
+            
+            if (digitsOnly.length() < 4) {
+                // 카드 번호가 너무 짧으면 전체 마스킹
+                return "****";
+            }
+
+            // 마지막 4자리 추출
+            String lastFour = digitsOnly.substring(digitsOnly.length() - 4);
+
+            // 원본에 하이픈이 있었다면 하이픈 패턴 유지
+            if (cardNo.contains("-")) {
+                // 하이픈으로 구분된 각 부분 처리
+                String[] parts = cardNo.split("-");
+                StringBuilder result = new StringBuilder();
+                
+                for (int i = 0; i < parts.length; i++) {
+                    if (i > 0) {
+                        result.append("-");
+                    }
+                    
+                    String part = parts[i].replaceAll("[^0-9]", "");
+                    if (i == parts.length - 1 && part.length() >= 4) {
+                        // 마지막 부분은 마지막 4자리만 표시
+                        result.append("*".repeat(part.length() - 4)).append(lastFour);
+                    } else {
+                        // 중간 부분은 모두 마스킹
+                        result.append("*".repeat(part.length()));
+                    }
+                }
+                return result.toString();
+            } else {
+                // 하이픈이 없으면 마스킹된 부분과 마지막 4자리만 반환
+                int maskedLength = digitsOnly.length() - 4;
+                return "*".repeat(maskedLength) + lastFour;
+            }
+        }
+
+        /**
+         * 로깅 및 이벤트 저장 시 사용할 수 있도록 마스킹된 정보를 포함한 문자열을 반환합니다.
+         * <p>
+         * PII 보호를 위해 cardNo는 마스킹된 버전으로 출력됩니다.
+         * </p>
+         *
+         * @return 마스킹된 정보를 포함한 문자열 표현
+         */
+        @Override
+        public String toString() {
+            return String.format(
+                    "PaymentRequested[orderId=%d, userId='%s', userEntityId=%d, totalAmount=%d, usedPointAmount=%d, cardType='%s', cardNo='%s', occurredAt=%s]",
+                    orderId,
+                    userId,
+                    userEntityId,
+                    totalAmount,
+                    usedPointAmount,
+                    cardType,
+                    maskedCardNo(),
+                    occurredAt
+            );
+        }
     }
 }

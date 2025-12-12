@@ -51,4 +51,12 @@ public class UserRepositoryImpl implements UserRepository {
     public User findById(Long id) {
         return userJpaRepository.findById(id).orElse(null);
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public User findByIdForUpdate(Long id) {
+        return userJpaRepository.findByIdForUpdate(id).orElse(null);
+    }
 }

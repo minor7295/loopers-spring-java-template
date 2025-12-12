@@ -1,6 +1,7 @@
 package com.loopers.interfaces.event.payment;
 
 import com.loopers.application.payment.PaymentEventHandler;
+import com.loopers.domain.coupon.CouponEvent;
 import com.loopers.domain.payment.PaymentEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +48,26 @@ public class PaymentEventListener {
             paymentEventHandler.handlePaymentRequested(event);
         } catch (Exception e) {
             log.error("결제 요청 이벤트 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
+            // 이벤트 처리 실패는 다른 리스너에 영향을 주지 않도록 예외를 삼킴
+        }
+    }
+
+    /**
+     * 쿠폰 적용 이벤트를 처리합니다.
+     * <p>
+     * 트랜잭션 커밋 후 비동기로 실행되어 결제 금액에 쿠폰 할인을 적용합니다.
+     * </p>
+     *
+     * @param event 쿠폰 적용 이벤트
+     */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleCouponApplied(CouponEvent.CouponApplied event) {
+        try {
+            paymentEventHandler.handleCouponApplied(event);
+        } catch (Exception e) {
+            log.error("쿠폰 적용 이벤트 처리 중 오류 발생. (orderId: {}, couponCode: {})",
+                    event.orderId(), event.couponCode(), e);
             // 이벤트 처리 실패는 다른 리스너에 영향을 주지 않도록 예외를 삼킴
         }
     }

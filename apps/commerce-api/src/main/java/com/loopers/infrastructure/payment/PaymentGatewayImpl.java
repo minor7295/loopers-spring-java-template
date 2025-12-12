@@ -1,7 +1,7 @@
 package com.loopers.infrastructure.payment;
 
 import com.loopers.domain.payment.PaymentGateway;
-import com.loopers.application.payment.PaymentRequestCommand;
+import com.loopers.domain.payment.PaymentRequest;
 import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.domain.payment.PaymentStatus;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -31,29 +31,29 @@ public class PaymentGatewayImpl implements PaymentGateway {
     /**
      * PG 결제 요청을 전송합니다.
      *
-     * @param command 결제 요청 명령
+     * @param request 결제 요청 값 객체
      * @return 결제 요청 결과
      */
     @Override
     @CircuitBreaker(name = "pgCircuit", fallbackMethod = "fallback")
-    public PaymentRequestResult requestPayment(PaymentRequestCommand command) {
-        PaymentGatewayDto.PaymentRequest dtoRequest = toDto(command);
+    public PaymentRequestResult requestPayment(PaymentRequest request) {
+        PaymentGatewayDto.PaymentRequest dtoRequest = toDto(request);
         PaymentGatewayDto.ApiResponse<PaymentGatewayDto.TransactionResponse> response =
-            paymentGatewayClient.requestPayment(command.userId(), dtoRequest);
+            paymentGatewayClient.requestPayment(request.userId(), dtoRequest);
         
-        return toDomainResult(response, command.orderId());
+        return toDomainResult(response, request.orderId());
     }
     
     /**
      * Circuit Breaker fallback 메서드.
      *
-     * @param command 결제 요청 명령
+     * @param request 결제 요청 값 객체
      * @param t 발생한 예외
      * @return 결제 대기 상태의 실패 결과
      */
-    public PaymentRequestResult fallback(PaymentRequestCommand command, Throwable t) {
+    public PaymentRequestResult fallback(PaymentRequest request, Throwable t) {
         log.warn("Circuit Breaker fallback 호출됨. (orderId: {}, exception: {})", 
-            command.orderId(), t.getClass().getSimpleName(), t);
+            request.orderId(), t.getClass().getSimpleName(), t);
         metrics.recordFallback("paymentGatewayClient");
         return new PaymentRequestResult.Failure(
             "CIRCUIT_BREAKER_OPEN",
@@ -106,13 +106,13 @@ public class PaymentGatewayImpl implements PaymentGateway {
         return convertToPaymentStatus(latestTransaction.status());
     }
     
-    private PaymentGatewayDto.PaymentRequest toDto(PaymentRequestCommand command) {
+    private PaymentGatewayDto.PaymentRequest toDto(PaymentRequest request) {
         return new PaymentGatewayDto.PaymentRequest(
-            String.format("%06d", command.orderId()),  // 주문 ID를 6자리 이상 문자열로 변환
-            PaymentGatewayDto.CardType.valueOf(command.cardType().toUpperCase()),
-            command.cardNo(),
-            command.amount(),
-            command.callbackUrl()
+            String.format("%06d", request.orderId()),  // 주문 ID를 6자리 이상 문자열로 변환
+            PaymentGatewayDto.CardType.valueOf(request.cardType().toUpperCase()),
+            request.cardNo(),
+            request.amount(),
+            request.callbackUrl()
         );
     }
     

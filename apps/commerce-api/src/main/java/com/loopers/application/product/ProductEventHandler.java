@@ -120,16 +120,19 @@ public class ProductEventHandler {
             // 정렬된 순서대로 상품 락 획득 (Deadlock 방지)
             Map<Long, Product> productMap = new HashMap<>();
             for (Long productId : sortedProductIds) {
-                Product product = productService.getProductForUpdate(productId);
-                productMap.put(productId, product);
+                try {
+                    Product product = productService.getProductForUpdate(productId);
+                    productMap.put(productId, product);
+                } catch (Exception e) {
+                    log.warn("상품 락 획득 실패. (orderId: {}, productId: {})", event.orderId(), productId);
+                    // 상품이 없으면 해당 아이템은 건너뜀
+                }
             }
 
             // 재고 차감
             for (OrderEvent.OrderCreated.OrderItemInfo itemInfo : event.orderItems()) {
                 Product product = productMap.get(itemInfo.productId());
                 if (product == null) {
-                    log.warn("상품을 찾을 수 없습니다. (orderId: {}, productId: {})",
-                            event.orderId(), itemInfo.productId());
                     continue;
                 }
                 product.decreaseStock(itemInfo.quantity());
@@ -175,8 +178,13 @@ public class ProductEventHandler {
             // 정렬된 순서대로 상품 락 획득 (Deadlock 방지)
             Map<Long, Product> productMap = new HashMap<>();
             for (Long productId : sortedProductIds) {
-                Product product = productService.getProductForUpdate(productId);
-                productMap.put(productId, product);
+                try {
+                    Product product = productService.getProductForUpdate(productId);
+                    productMap.put(productId, product);
+                } catch (Exception e) {
+                    log.warn("상품 락 획득 실패. (orderId: {}, productId: {})", event.orderId(), productId);
+                    // 상품이 없으면 해당 아이템은 건너뜀
+                }
             }
 
             // 재고 원복

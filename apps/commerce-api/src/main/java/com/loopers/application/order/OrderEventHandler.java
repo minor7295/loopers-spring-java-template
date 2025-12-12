@@ -102,6 +102,12 @@ public class OrderEventHandler {
             return;
         }
 
+        // 이미 완료된 주문인 경우 처리하지 않음 (race condition 방지)
+        if (order.isCompleted()) {
+            log.warn("이미 완료된 주문입니다. 결제 실패 처리를 건너뜁니다. (orderId: {})", event.orderId());
+            return;
+        }
+
         // 이미 취소된 주문인 경우 처리하지 않음
         if (order.isCanceled()) {
             log.debug("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", event.orderId());

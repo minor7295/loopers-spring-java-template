@@ -164,7 +164,7 @@ public class PurchasingFacade {
 
         // ✅ 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행
         // ✅ PaymentEventHandler가 PaymentEvent.PaymentRequested를 구독하여 Payment 생성 및 PG 결제 요청 처리
-        if (paidAmount == 0) {
+        if (paidAmount.equals(0L)) {
             // 포인트+쿠폰으로 전액 결제 완료된 경우
             // PaymentEventHandler가 Payment를 생성하고 바로 완료 처리
             paymentEventPublisher.publish(PaymentEvent.PaymentRequested.of(
@@ -367,21 +367,26 @@ public class PurchasingFacade {
             
             if (paymentStatus == PaymentStatus.SUCCESS) {
                 // 결제 성공: 주문 완료
-                orderService.updateStatusByPaymentResult(order, paymentStatus);
+                orderService.updateStatusByPaymentResult(order, paymentStatus, null, null);
                 log.info("결제 상태 확인 결과, 주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})",
                     orderId, transactionKey);
                 return true;
             } else if (paymentStatus == PaymentStatus.FAILED) {
                 // 결제 실패: 주문 취소 및 리소스 원복
-                User user = userService.getUserById(order.getUserId());
-                if (user == null) {
-                    log.warn("주문 상태 업데이트 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
-                        orderId, order.getUserId());
-                    return false;
-                }
-                cancelOrder(order, user);
-                log.info("결제 상태 확인 결과, 주문 상태를 CANCELED로 업데이트했습니다. (orderId: {}, transactionKey: {}, reason: {})",
-                    orderId, transactionKey, reason);
+                // 실제로 사용된 포인트만 환불 (Payment에서 확인)
+                Long refundPointAmount = paymentService.getPaymentByOrderId(order.getId())
+                    .map(Payment::getUsedPoint)
+                    .orElse(0L);
+                
+                // 취소 사유 설정 (reason이 없으면 기본값 사용)
+                String cancelReason = (reason != null && !reason.isBlank()) 
+                    ? reason 
+                    : "결제 실패";
+                
+                // 주문 취소 처리 (이벤트 발행 포함)
+                orderService.updateStatusByPaymentResult(order, paymentStatus, cancelReason, refundPointAmount);
+                log.info("결제 상태 확인 결과, 주문 상태를 CANCELED로 업데이트했습니다. (orderId: {}, transactionKey: {}, reason: {}, refundPointAmount: {})",
+                    orderId, transactionKey, cancelReason, refundPointAmount);
                 return true;
             } else {
                 // PENDING 상태: 아직 처리 중 (정상적인 경우이므로 true 반환)

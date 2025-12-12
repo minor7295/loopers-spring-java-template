@@ -1,4 +1,4 @@
-package com.loopers.application.integration;
+package com.loopers.interfaces.event.data;
 
 import com.loopers.domain.order.OrderEvent;
 import lombok.RequiredArgsConstructor;

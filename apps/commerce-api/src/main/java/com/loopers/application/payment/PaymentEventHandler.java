@@ -1,9 +1,11 @@
 package com.loopers.application.payment;
 
+import com.loopers.domain.coupon.CouponEvent;
 import com.loopers.domain.payment.CardType;
 import com.loopers.domain.payment.Payment;
 import com.loopers.domain.payment.PaymentEvent;
 import com.loopers.domain.payment.PaymentGateway;
+import com.loopers.domain.payment.PaymentRequest;
 import com.loopers.domain.payment.PaymentRequestResult;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
@@ -68,7 +70,7 @@ public class PaymentEventHandler {
 
             // 결제 금액이 0인 경우 (포인트+쿠폰으로 전액 결제)
             Long paidAmount = event.totalAmount() - event.usedPointAmount();
-            if (paidAmount == 0) {
+            if (paidAmount.equals(0L)) {
                 // PG 요청 없이 바로 완료 (PaymentCompleted 이벤트 발행)
                 paymentService.toSuccess(payment.getId(), LocalDateTime.now(), null);
                 log.info("포인트+쿠폰으로 전액 결제 완료. (orderId: {})", event.orderId());
@@ -90,12 +92,29 @@ public class PaymentEventHandler {
                         @Override
                         public void afterCommit() {
                             try {
-                                // PaymentRequested 이벤트에 포함된 totalAmount 사용
-                                // 쿠폰 적용은 별도 이벤트 핸들러에서 처리되므로, 
-                                // Payment 생성 시점의 totalAmount를 사용
-                                Long paidAmount = event.totalAmount() - event.usedPointAmount();
+                                // 쿠폰 할인이 적용된 후의 최신 Payment 정보 조회
+                                // 쿠폰 할인이 적용되면 Payment.applyCouponDiscount에서 paidAmount가 재계산됨
+                                Payment payment = paymentService.getPaymentByOrderId(event.orderId())
+                                    .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
+                                        String.format("주문 ID에 해당하는 결제를 찾을 수 없습니다. (orderId: %d)", event.orderId())));
+                                
+                                // 이미 완료된 결제는 PG 요청 불필요
+                                if (payment.isCompleted()) {
+                                    log.info("결제가 이미 완료되어 PG 요청을 건너뜁니다. (orderId: {})", event.orderId());
+                                    return;
+                                }
+                                
+                                // 최신 paidAmount 사용 (쿠폰 할인 적용 후 금액)
+                                Long paidAmount = payment.getPaidAmount();
+                                
+                                // paidAmount가 0이면 PG 요청 불필요 (이미 완료 처리됨)
+                                if (paidAmount == 0L) {
+                                    log.info("결제 금액이 0이어서 PG 요청을 건너뜁니다. (orderId: {})", event.orderId());
+                                    return;
+                                }
 
-                                // ✅ PaymentEvent.PaymentRequested를 구독하여 결제 요청 Command 실행
+                                // ✅ PaymentEvent.PaymentRequested를 구독하여 결제 요청 실행
+                                // PaymentRequestCommand(애플리케이션 계층)를 생성하고 도메인 계층으로 변환
                                 String callbackUrl = generateCallbackUrl(event.orderId());
                                 PaymentRequestCommand command = new PaymentRequestCommand(
                                     event.userId(),
@@ -106,8 +125,9 @@ public class PaymentEventHandler {
                                     callbackUrl
                                 );
 
-                                // PG 결제 요청
-                                PaymentRequestResult result = paymentGateway.requestPayment(command);
+                                // 도메인 계층으로 변환하여 PG 결제 요청
+                                PaymentRequest paymentRequest = command.toPaymentRequest();
+                                PaymentRequestResult result = paymentGateway.requestPayment(paymentRequest);
 
                                 if (result instanceof PaymentRequestResult.Success success) {
                                     // 결제 성공: PaymentService.toSuccess가 PaymentCompleted 이벤트를 발행하고,
@@ -144,6 +164,45 @@ public class PaymentEventHandler {
         } catch (Exception e) {
             log.error("결제 요청 처리 중 오류 발생. (orderId: {})", event.orderId(), e);
             throw e;
+        }
+    }
+
+    /**
+     * 쿠폰 적용 이벤트를 처리하여 결제 금액을 업데이트합니다.
+     * <p>
+     * 쿠폰 할인이 적용된 후 Order의 totalAmount가 업데이트되면,
+     * Payment의 totalAmount도 동기화하기 위해 호출됩니다.
+     * </p>
+     * <p>
+     * <b>EDA 원칙:</b>
+     * <ul>
+     *   <li><b>이벤트 구독:</b> CouponEvent.CouponApplied 이벤트를 구독하여 결제 도메인 상태 업데이트</li>
+     *   <li><b>책임 분리:</b> CouponEventHandler는 쿠폰 도메인만 관리하고, 결제 동기화는 이 핸들러에서 처리</li>
+     * </ul>
+     * </p>
+     *
+     * @param event 쿠폰 적용 이벤트
+     */
+    @Transactional
+    public void handleCouponApplied(CouponEvent.CouponApplied event) {
+        try {
+            // 결제 금액에 쿠폰 할인 적용
+            paymentService.applyCouponDiscount(event.orderId(), event.discountAmount());
+            
+            log.info("쿠폰 할인 금액이 결제에 적용되었습니다. (orderId: {}, couponCode: {}, discountAmount: {})",
+                    event.orderId(), event.couponCode(), event.discountAmount());
+        } catch (CoreException e) {
+            // 결제를 찾을 수 없는 경우는 로그만 기록 (정상적인 경우일 수 있음)
+            if (e.getErrorType() == ErrorType.NOT_FOUND) {
+                log.debug("쿠폰 적용 시 결제를 찾을 수 없습니다. (orderId: {}, couponCode: {})",
+                        event.orderId(), event.couponCode());
+            } else {
+                log.error("쿠폰 적용 이벤트 처리 중 오류 발생. (orderId: {}, couponCode: {})",
+                        event.orderId(), event.couponCode(), e);
+            }
+        } catch (Exception e) {
+            log.error("쿠폰 적용 이벤트 처리 중 예상치 못한 오류 발생. (orderId: {}, couponCode: {})",
+                    event.orderId(), event.couponCode(), e);
         }
     }
 

@@ -55,7 +55,8 @@ public class PointEventHandler {
 
         try {
             // 사용자 조회 (비관적 락 사용)
-            User user = userService.getUserById(event.userId());
+            // OrderEvent.OrderCreated의 userId는 Long 타입 (User.id - PK)
+            User user = userService.getUserByIdForUpdate(event.userId());
             
             // 포인트 잔액 검증
             Long userPointBalance = user.getPointValue();
@@ -126,20 +127,13 @@ public class PointEventHandler {
         }
 
         try {
-            // ✅ Deadlock 방지: User 락을 먼저 획득하여 createOrder와 동일한 락 획득 순서 보장
-            User user = userService.getUserById(event.userId());
-            if (user == null) {
-                log.warn("주문 취소 이벤트 처리 시 사용자를 찾을 수 없습니다. (orderId: {}, userId: {})",
-                        event.orderId(), event.userId());
-                return;
-            }
-
-            // 비관적 락을 사용하여 사용자 조회 (포인트 환불 시 동시성 제어)
-            User lockedUser = userService.getUserForUpdate(user.getUserId());
-
+            // ✅ 동시성 제어: 포인트 환불 시 Lost Update 방지를 위해 비관적 락 사용
+            // OrderEvent.OrderCanceled의 userId는 Long 타입 (User.id - PK)
+            User user = userService.getUserByIdForUpdate(event.userId());
+            
             // 포인트 환불
-            lockedUser.receivePoint(Point.of(event.refundPointAmount()));
-            userService.save(lockedUser);
+            user.receivePoint(Point.of(event.refundPointAmount()));
+            userService.save(user);
 
             log.info("주문 취소로 인한 포인트 환불 완료. (orderId: {}, userId: {}, refundPointAmount: {})",
                     event.orderId(), event.userId(), event.refundPointAmount());

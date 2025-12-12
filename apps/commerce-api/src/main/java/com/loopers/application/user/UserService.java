@@ -100,6 +100,25 @@ public class UserService {
     }
 
     /**
+     * 사용자 ID (PK)로 사용자를 조회합니다. (비관적 락)
+     * <p>
+     * 포인트 차감 등 동시성 제어가 필요한 경우 사용합니다.
+     * </p>
+     *
+     * @param id 사용자 ID (PK)
+     * @return 조회된 사용자
+     * @throws CoreException 사용자를 찾을 수 없는 경우
+     */
+    @Transactional
+    public User getUserByIdForUpdate(Long id) {
+        User user = userRepository.findByIdForUpdate(id);
+        if (user == null) {
+            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
+        }
+        return user;
+    }
+
+    /**
      * 사용자를 저장합니다.
      *
      * @param user 저장할 사용자
@@ -127,6 +146,15 @@ public class UserService {
      * 사용자의 포인트를 충전합니다.
      * <p>
      * 트랜잭션 내에서 실행되어 데이터 일관성을 보장합니다.
+     * 비관적 락(PESSIMISTIC_WRITE)을 사용하여 동시 충전 요청 시 Lost Update를 방지합니다.
+     * </p>
+     * <p>
+     * <b>동시성 제어:</b>
+     * <ul>
+     *   <li><b>비관적 락 사용:</b> SELECT ... FOR UPDATE로 해당 사용자 행에 배타적 락 설정</li>
+     *   <li><b>Lost Update 방지:</b> 동시 충전 요청이 들어와도 순차적으로 처리되어 모든 충전이 반영됨</li>
+     *   <li><b>Lock 범위 최소화:</b> UNIQUE(userId) 인덱스 기반 조회로 해당 행만 락</li>
+     * </ul>
      * </p>
      *
      * @param userId 충전할 사용자 ID
@@ -136,7 +164,7 @@ public class UserService {
      */
     @Transactional
     public PointsInfo chargePoint(String userId, Long amount) {
-        User user = getUser(userId);
+        User user = getUserForUpdate(userId);
         Point point = Point.of(amount);
         user.receivePoint(point);
         User savedUser = save(user);

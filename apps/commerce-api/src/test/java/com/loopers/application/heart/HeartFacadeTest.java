@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 
-@DisplayName("LikeFacade 좋아요 등록/취소/중복 방지 흐름 검증")
+@DisplayName("HeartFacade 좋아요 등록/취소/중복 방지 흐름 검증")
 class HeartFacadeTest {
 
     @Mock

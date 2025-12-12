@@ -250,7 +250,7 @@ public class PaymentService {
             LocalDateTime.now()
         );
         
-        // 3. 결제 요청 명령 생성 (PG 요청에는 String userId 사용)
+        // 3. 결제 요청 명령 생성 (애플리케이션 계층)
         String callbackUrl = generateCallbackUrl(orderId);
         PaymentRequestCommand command = new PaymentRequestCommand(
             userId,
@@ -261,8 +261,9 @@ public class PaymentService {
             callbackUrl
         );
         
-        // 4. PG 결제 요청 전송
-        PaymentRequestResult result = paymentGateway.requestPayment(command);
+        // 4. 도메인 계층으로 변환하여 PG 결제 요청 전송
+        PaymentRequest paymentRequest = command.toPaymentRequest();
+        PaymentRequestResult result = paymentGateway.requestPayment(paymentRequest);
         
         // 5. 결과 처리
         if (result instanceof PaymentRequestResult.Success success) {
@@ -280,8 +281,8 @@ public class PaymentService {
                 orderId, failure.errorCode(), failure.message());
             return result;
         }
-        
-        return result;
+
+        throw new IllegalStateException("알 수 없는 결제 결과 타입: " + result.getClass().getName());
     }
     
     /**
@@ -381,6 +382,27 @@ public class PaymentService {
      */
     public void recoverAfterTimeout(String userId, Long orderId) {
         recoverAfterTimeout(userId, orderId, Duration.ofSeconds(1));
+    }
+    
+    /**
+     * 쿠폰 할인 금액을 적용하여 결제 금액을 업데이트합니다.
+     * <p>
+     * 쿠폰 할인이 적용된 후 Order의 totalAmount가 업데이트되면,
+     * Payment의 totalAmount도 동기화하기 위해 호출됩니다.
+     * </p>
+     *
+     * @param orderId 주문 ID
+     * @param discountAmount 할인 금액
+     * @throws CoreException 결제를 찾을 수 없거나 할인 금액이 유효하지 않은 경우
+     */
+    @Transactional
+    public void applyCouponDiscount(Long orderId, Integer discountAmount) {
+        Payment payment = getPaymentByOrderId(orderId)
+            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, 
+                String.format("주문 ID에 해당하는 결제를 찾을 수 없습니다. (orderId: %d)", orderId)));
+        
+        payment.applyCouponDiscount(discountAmount);
+        paymentRepository.save(payment);
     }
     
     // 내부 헬퍼 메서드들

@@ -8,6 +8,8 @@ import com.loopers.domain.product.Product;
 import com.loopers.domain.user.User;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -136,7 +138,7 @@ public class HeartFacade {
             // ✅ LikeService.delete()가 LikeEvent.LikeRemoved 이벤트를 발행
             // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
             likeService.delete(like.get());
-        } catch (Exception e) {
+        } catch (EmptyResultDataAccessException | ObjectOptimisticLockingFailureException e) {
             // 동시성 상황에서 이미 삭제된 경우 등 예외 발생 가능
             // 멱등성 보장: 이미 삭제된 경우 정상 처리로 간주
         }
