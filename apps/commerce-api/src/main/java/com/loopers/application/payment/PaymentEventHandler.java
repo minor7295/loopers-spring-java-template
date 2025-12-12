@@ -113,9 +113,9 @@ public class PaymentEventHandler {
                                     return;
                                 }
 
-                                // ✅ PaymentEvent.PaymentRequested를 구독하여 결제 요청 실행
-                                // PaymentRequestCommand(애플리케이션 계층)를 생성하고 도메인 계층으로 변환
+                                // ✅ PaymentEvent.PaymentRequested를 구독하여 결제 요청 Command 실행
                                 String callbackUrl = generateCallbackUrl(event.orderId());
+                                // ✅ RequestPaymentCommand (PaymentRequestCommand) 생성 및 실행
                                 PaymentRequestCommand command = new PaymentRequestCommand(
                                     event.userId(),
                                     event.orderId(),
@@ -124,7 +124,6 @@ public class PaymentEventHandler {
                                     paidAmount,
                                     callbackUrl
                                 );
-
                                 // 도메인 계층으로 변환하여 PG 결제 요청
                                 PaymentRequest paymentRequest = command.toPaymentRequest();
                                 PaymentRequestResult result = paymentGateway.requestPayment(paymentRequest);

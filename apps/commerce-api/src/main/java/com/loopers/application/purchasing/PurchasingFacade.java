@@ -2,6 +2,7 @@ package com.loopers.application.purchasing;
 
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
+import com.loopers.application.order.CreateOrderCommand;
 import com.loopers.application.order.OrderService;
 import com.loopers.domain.product.Product;
 import com.loopers.application.product.ProductService;
@@ -150,11 +151,20 @@ public class PurchasingFacade {
         // 포인트 사용량
         Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
 
+        // ✅ CreateOrderCommand 생성
+        CreateOrderCommand createOrderCommand = new CreateOrderCommand(
+            user.getId(),
+            orderItems,
+            couponCode,
+            subtotal,
+            usedPointAmount
+        );
+
         // ✅ OrderService.create() 호출 → OrderEvent.OrderCreated 이벤트 발행
         // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
         // ✅ CouponEventHandler가 OrderEvent.OrderCreated를 구독하여 쿠폰 적용 처리
         // ✅ PointEventHandler가 OrderEvent.OrderCreated를 구독하여 포인트 차감 처리
-        Order savedOrder = orderService.create(user.getId(), orderItems, couponCode, subtotal, usedPointAmount);
+        Order savedOrder = orderService.create(createOrderCommand);
 
         // PG 결제 금액 계산
         // 주의: 쿠폰 할인은 비동기로 적용되므로, PaymentEvent.PaymentRequested 발행 시점에는 할인 전 금액(subtotal)을 사용

@@ -136,21 +136,17 @@ public class OrderService {
      * 주문 생성 후 OrderCreated 이벤트를 발행합니다.
      * </p>
      *
-     * @param userId 사용자 ID
-     * @param items 주문 아이템 목록
-     * @param couponCode 쿠폰 코드 (선택)
-     * @param subtotal 주문 소계 (쿠폰 할인 전 금액)
-     * @param usedPointAmount 사용할 포인트 금액
+     * @param command 주문 생성 명령
      * @return 생성된 주문
      */
     @Transactional
-    public Order create(Long userId, List<OrderItem> items, String couponCode, Integer subtotal, Long usedPointAmount) {
+    public Order create(CreateOrderCommand command) {
         // 쿠폰이 있어도 discountAmount는 0으로 설정 (CouponEventHandler가 이벤트를 받아 쿠폰 적용)
-        Order order = Order.of(userId, items, couponCode, 0);
+        Order order = Order.of(command.userId(), command.items(), command.couponCode(), 0);
         Order savedOrder = orderRepository.save(order);
         
         // ✅ 도메인 이벤트 발행: 주문이 생성되었음 (과거 사실)
-        orderEventPublisher.publish(OrderEvent.OrderCreated.from(savedOrder, subtotal, usedPointAmount));
+        orderEventPublisher.publish(OrderEvent.OrderCreated.from(savedOrder, command.subtotal(), command.usedPointAmount()));
         
         return savedOrder;
     }

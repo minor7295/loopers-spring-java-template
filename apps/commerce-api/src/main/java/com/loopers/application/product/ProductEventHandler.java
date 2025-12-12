@@ -129,13 +129,16 @@ public class ProductEventHandler {
                 }
             }
 
-            // 재고 차감
+            // ✅ OrderEvent.OrderCreated를 구독하여 재고 차감 Command 실행
             for (OrderEvent.OrderCreated.OrderItemInfo itemInfo : event.orderItems()) {
                 Product product = productMap.get(itemInfo.productId());
                 if (product == null) {
                     continue;
                 }
-                product.decreaseStock(itemInfo.quantity());
+                
+                // ✅ DeductStockCommand 생성 및 실행
+                DeductStockCommand command = new DeductStockCommand(itemInfo.productId(), itemInfo.quantity());
+                product.decreaseStock(command.quantity());
             }
 
             // 저장
