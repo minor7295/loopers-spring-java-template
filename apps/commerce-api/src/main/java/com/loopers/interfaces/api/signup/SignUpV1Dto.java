@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.signup;
 
-import com.loopers.application.signup.SignUpInfo;
+import com.loopers.domain.user.User;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -36,18 +36,18 @@ public class SignUpV1Dto {
      */
     public record SignupResponse(Long id, String userId, String email, String birthDate, String gender) {
         /**
-         * SignUpInfo로부터 SignupResponse를 생성합니다.
+         * User 엔티티로부터 SignupResponse를 생성합니다.
          *
-         * @param info 회원가입 정보
+         * @param user 사용자 엔티티
          * @return 생성된 응답 객체
          */
-        public static SignupResponse from(SignUpInfo info) {
+        public static SignupResponse from(User user) {
             return new SignupResponse(
-                info.id(),
-                info.userId(),
-                info.email(),
-                info.birthDate().toString(),
-                info.gender() != null ? info.gender().name() : null
+                user.getId(),
+                user.getUserId(),
+                user.getEmail(),
+                user.getBirthDate().toString(),
+                user.getGender() != null ? user.getGender().name() : null
             );
         }
     }

@@ -1,7 +1,7 @@
 package com.loopers.interfaces.api;
 
-import com.loopers.application.pointwallet.PointWalletFacade;
-import com.loopers.application.signup.SignUpFacade;
+import com.loopers.application.user.UserService;
+import com.loopers.domain.user.Point;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.brand.BrandRepository;
 import com.loopers.domain.order.OrderStatus;
@@ -9,9 +9,9 @@ import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductRepository;
 import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.UserTestFixture;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewaySchedulerClient;
+import com.loopers.infrastructure.payment.PaymentGatewayClient;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewaySchedulerClient;
 import com.loopers.interfaces.api.ApiResponse;
 import com.loopers.interfaces.api.purchasing.PurchasingV1Dto;
 import com.loopers.utils.DatabaseCleanUp;
@@ -69,10 +69,7 @@ public class PurchasingV1ApiE2ETest {
     private TestRestTemplate testRestTemplate;
 
     @Autowired
-    private SignUpFacade signUpFacade;
-
-    @Autowired
-    private PointWalletFacade pointWalletFacade;
+    private UserService userService;
 
     @Autowired
     private ProductRepository productRepository;
@@ -107,8 +104,8 @@ public class PurchasingV1ApiE2ETest {
         String userId = UserTestFixture.ValidUser.USER_ID;
         String email = UserTestFixture.ValidUser.EMAIL;
         String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-        signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-        pointWalletFacade.chargePoint(userId, 500_000L);
+        userService.create(userId, email, birthDate, Gender.MALE, Point.of(0L));
+        userService.chargePoint(userId, 500_000L);
 
         Brand brand = Brand.of("테스트 브랜드");
         Brand savedBrand = brandRepository.save(brand);
@@ -119,7 +116,7 @@ public class PurchasingV1ApiE2ETest {
             List.of(
                 new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
             ),
-            new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+            new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -239,8 +236,8 @@ public class PurchasingV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.create(userId, email, birthDate, Gender.MALE, Point.of(0L));
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);
@@ -252,7 +249,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -344,8 +341,8 @@ public class PurchasingV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.create(userId, email, birthDate, Gender.MALE, Point.of(0L));
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);
@@ -357,7 +354,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();
@@ -455,8 +452,8 @@ public class PurchasingV1ApiE2ETest {
             String userId = UserTestFixture.ValidUser.USER_ID;
             String email = UserTestFixture.ValidUser.EMAIL;
             String birthDate = UserTestFixture.ValidUser.BIRTH_DATE;
-            signUpFacade.signUp(userId, email, birthDate, Gender.MALE.name());
-            pointWalletFacade.chargePoint(userId, 500_000L);
+            userService.create(userId, email, birthDate, Gender.MALE, Point.of(0L));
+            userService.chargePoint(userId, 500_000L);
 
             Brand brand = Brand.of("테스트 브랜드");
             Brand savedBrand = brandRepository.save(brand);
@@ -468,7 +465,7 @@ public class PurchasingV1ApiE2ETest {
                 List.of(
                     new PurchasingV1Dto.ItemRequest(savedProduct.getId(), 1)
                 ),
-                new PurchasingV1Dto.PaymentRequest("SAMSUNG", "4111-1111-1111-1111")
+                new PurchasingV1Dto.PaymentRequest(null, "SAMSUNG", "4111-1111-1111-1111")
             );
 
             HttpHeaders createHeaders = new HttpHeaders();

@@ -1,6 +1,6 @@
 package com.loopers.interfaces.api.userinfo;
 
-import com.loopers.application.userinfo.UserInfoFacade;
+import com.loopers.domain.user.User;
 
 /**
  * 사용자 정보 조회 API v1의 데이터 전송 객체(DTO) 컨테이너.
@@ -24,17 +24,17 @@ public class UserInfoV1Dto {
         String gender
     ) {
         /**
-         * UserInfo로부터 UserInfoResponse를 생성합니다.
+         * User 엔티티로부터 UserInfoResponse를 생성합니다.
          *
-         * @param userInfo 사용자 정보
+         * @param user 사용자 엔티티
          * @return 생성된 응답 객체
          */
-        public static UserInfoResponse from(UserInfoFacade.UserInfo userInfo) {
+        public static UserInfoResponse from(User user) {
             return new UserInfoResponse(
-                userInfo.userId(),
-                userInfo.email(),
-                userInfo.birthDate().toString(),
-                userInfo.gender() != null ? userInfo.gender().name() : null
+                user.getUserId(),
+                user.getEmail(),
+                user.getBirthDate().toString(),
+                user.getGender() != null ? user.getGender().name() : null
             );
         }
     }

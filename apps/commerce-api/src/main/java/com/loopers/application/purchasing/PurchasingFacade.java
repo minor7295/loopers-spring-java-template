@@ -1,33 +1,24 @@
 package com.loopers.application.purchasing;
 
-import com.loopers.domain.coupon.Coupon;
-import com.loopers.domain.coupon.CouponRepository;
-import com.loopers.domain.coupon.UserCoupon;
-import com.loopers.domain.coupon.UserCouponRepository;
-import com.loopers.domain.coupon.discount.CouponDiscountStrategyFactory;
 import com.loopers.domain.order.Order;
 import com.loopers.domain.order.OrderItem;
-import com.loopers.domain.order.OrderRepository;
-import com.loopers.domain.order.OrderStatus;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import com.loopers.application.order.CreateOrderCommand;
+import com.loopers.application.order.OrderService;
 import com.loopers.domain.product.Product;
-import com.loopers.domain.product.ProductRepository;
-import com.loopers.domain.user.Point;
+import com.loopers.application.product.ProductService;
 import com.loopers.domain.user.User;
-import com.loopers.domain.user.UserRepository;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewaySchedulerClient;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayAdapter;
-import com.loopers.domain.order.PaymentFailureClassifier;
-import com.loopers.domain.order.PaymentFailureType;
-import com.loopers.domain.order.OrderStatusUpdater;
-import com.loopers.domain.order.OrderCancellationService;
+import com.loopers.application.user.UserService;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
+import com.loopers.domain.payment.PaymentEvent;
+import com.loopers.domain.payment.PaymentEventPublisher;
+import com.loopers.application.payment.PaymentService;
+import com.loopers.domain.payment.Payment;
+import com.loopers.domain.payment.PaymentStatus;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import feign.FeignException;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -36,79 +27,72 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 /**
  * 구매 파사드.
  * <p>
- * 주문 생성과 결제(포인트 차감), 재고 조정, 외부 연동을 조율한다.
+ * 주문 생성과 결제(포인트 차감), 재고 조정, 외부 연동을 조율하는 애플리케이션 서비스입니다.
+ * 여러 도메인 서비스를 조합하여 구매 유즈케이스를 처리합니다.
  * </p>
+ * <p>
+ * <b>EDA 원칙 준수:</b>
+ * <ul>
+ *   <li><b>이벤트 기반:</b> 도메인 이벤트만 발행하고, 다른 애그리거트를 직접 수정하지 않음</li>
+ *   <li><b>느슨한 결합:</b> Product, User, Payment 애그리거트와의 직접적인 의존성 최소화</li>
+ *   <li><b>책임 분리:</b> 주문 도메인만 관리하고, 재고/포인트/결제 처리는 이벤트 핸들러에서 처리</li>
+ * </ul>
+ * </p>
+ *
+ * @author Loopers
+ * @version 1.0
  */
 @Slf4j
 @RequiredArgsConstructor
 @Component
 public class PurchasingFacade {
 
-    private final UserRepository userRepository;
-    private final ProductRepository productRepository;
-    private final OrderRepository orderRepository;
-    private final CouponRepository couponRepository;
-    private final UserCouponRepository userCouponRepository;
-    private final CouponDiscountStrategyFactory couponDiscountStrategyFactory;
-    private final PaymentGatewaySchedulerClient paymentGatewaySchedulerClient; // 스케줄러용 (Retry 적용)
-    private final PaymentRequestBuilder paymentRequestBuilder;
-    private final PaymentGatewayAdapter paymentGatewayAdapter;
-    private final PaymentFailureClassifier paymentFailureClassifier;
-    private final PaymentRecoveryService paymentRecoveryService;
-    private final OrderCancellationService orderCancellationService;
-    private final OrderStatusUpdater orderStatusUpdater;
-    private final PaymentFailureHandler paymentFailureHandler;
+    private final UserService userService; // String userId를 Long id로 변환하는 데만 사용
+    private final ProductService productService; // 상품 조회용으로만 사용 (재고 검증은 이벤트 핸들러에서)
+    private final OrderService orderService;
+    private final PaymentService paymentService; // Payment 조회용으로만 사용
+    private final PaymentEventPublisher paymentEventPublisher; // PaymentEvent 발행용
 
     /**
      * 주문을 생성한다.
      * <p>
      * 1. 사용자 조회 및 존재 여부 검증<br>
-     * 2. 상품 재고 검증 및 차감<br>
-     * 3. 사용자 포인트 검증 및 차감<br>
-     * 4. 주문 저장<br>
-     * 5. PG 결제 요청 (비동기)
+     * 2. 상품 조회 (재고 검증은 이벤트 핸들러에서 처리)<br>
+     * 3. 쿠폰 할인 적용<br>
+     * 4. 주문 저장 및 OrderEvent.OrderCreated 이벤트 발행<br>
+     * 5. 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행<br>
      * </p>
      * <p>
-     * <b>동시성 제어 전략:</b>
+     * <b>결제 방식:</b>
      * <ul>
-     *   <li><b>PESSIMISTIC_WRITE 사용 근거:</b> Lost Update 방지 및 데이터 일관성 보장</li>
-     *   <li><b>포인트 차감:</b> 동시 주문 시 포인트 중복 차감 방지 (금전적 손실 방지)</li>
-     *   <li><b>재고 차감:</b> 동시 주문 시 재고 음수 방지 및 정확한 차감 보장 (재고 oversell 방지)</li>
-     *   <li><b>Lock 범위 최소화:</b> PK/UNIQUE 인덱스 기반 조회로 Lock 범위 최소화</li>
+     *   <li><b>포인트+쿠폰 전액 결제:</b> paidAmount == 0이면 PG 요청 없이 바로 완료</li>
+     *   <li><b>혼합 결제:</b> 포인트 일부 사용 + PG 결제 나머지 금액</li>
+     *   <li><b>카드만 결제:</b> 포인트 사용 없이 카드로 전체 금액 결제</li>
      * </ul>
      * </p>
      * <p>
-     * <b>DBA 설득 근거 (비관적 락 사용):</b>
+     * <b>EDA 원칙:</b>
      * <ul>
-     *   <li><b>제한적 사용:</b> 전역이 아닌 금전적 손실 위험이 있는 특정 도메인에만 사용</li>
-     *   <li><b>트랜잭션 최소화:</b> 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음 (몇 ms)</li>
-     *   <li><b>Lock 범위 최소화:</b> PK/UNIQUE 인덱스 기반 조회로 해당 행만 락 (Record Lock)</li>
-     *   <li><b>애플리케이션 레벨 한계:</b> 애플리케이션 레벨로는 race condition을 완전히 방지할 수 없어서 DB 차원의 strong consistency 필요</li>
-     *   <li><b>낙관적 락 기본 전략:</b> 쿠폰 사용은 낙관적 락 사용 (Hot Spot 대응)</li>
+     *   <li><b>이벤트 기반:</b> 재고 차감은 OrderEvent.OrderCreated를 구독하는 ProductEventHandler에서 처리</li>
+     *   <li><b>이벤트 기반:</b> 포인트 차감은 OrderEvent.OrderCreated를 구독하는 PointEventHandler에서 처리</li>
+     *   <li><b>이벤트 기반:</b> Payment 생성 및 PG 결제는 PaymentEvent.PaymentRequested를 구독하는 PaymentEventHandler에서 처리</li>
+     *   <li><b>느슨한 결합:</b> Product, User, Payment 애그리거트를 직접 수정하지 않고 이벤트만 발행</li>
      * </ul>
-     * </p>
-     * <p>
-     * <b>Lock 생명주기:</b>
-     * <ol>
-     *   <li>SELECT ... FOR UPDATE 실행 시 락 획득</li>
-     *   <li>트랜잭션 내에서 락 유지 (외부 I/O 없음, 매우 짧은 시간)</li>
-     *   <li>트랜잭션 커밋/롤백 시 락 자동 해제</li>
-     * </ol>
      * </p>
      *
      * @param userId 사용자 식별자 (로그인 ID)
      * @param commands 주문 상품 정보
-     * @param cardType 카드 타입 (SAMSUNG, KB, HYUNDAI)
-     * @param cardNo 카드 번호 (xxxx-xxxx-xxxx-xxxx 형식)
+     * @param usedPoint 포인트 사용량 (선택, 기본값: 0)
+     * @param cardType 카드 타입 (paidAmount > 0일 때만 필수)
+     * @param cardNo 카드 번호 (paidAmount > 0일 때만 필수)
      * @return 생성된 주문 정보
      */
     @Transactional
-    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands, String cardType, String cardNo) {
+    public OrderInfo createOrder(String userId, List<OrderItemCommand> commands, Long usedPoint, String cardType, String cardNo) {
         if (userId == null || userId.isBlank()) {
             throw new CoreException(ErrorType.BAD_REQUEST, "사용자 ID는 필수입니다.");
         }
@@ -116,14 +100,11 @@ public class PurchasingFacade {
             throw new CoreException(ErrorType.BAD_REQUEST, "주문 아이템은 1개 이상이어야 합니다.");
         }
 
-        // 비관적 락을 사용하여 사용자 조회 (포인트 차감 시 동시성 제어)
-        // - userId는 UNIQUE 인덱스가 있어 Lock 범위 최소화 (Record Lock만 적용)
-        // - Lost Update 방지: 동시 주문 시 포인트 중복 차감 방지 (금전적 손실 방지)
-        // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
-        User user = loadUserForUpdate(userId);
+        // ✅ EDA 원칙: UserService는 String userId를 Long id로 변환하는 데만 사용
+        // 포인트 검증은 PointEventHandler에서 처리
+        User user = userService.getUser(userId);
 
-        // ✅ Deadlock 방지: 상품 ID를 정렬하여 일관된 락 획득 순서 보장
-        // 여러 상품을 주문할 때, 항상 동일한 순서로 락을 획득하여 deadlock 방지
+        // ✅ EDA 원칙: ProductService는 상품 조회만 (재고 검증은 ProductEventHandler에서 처리)
         List<Long> sortedProductIds = commands.stream()
             .map(OrderItemCommand::productId)
             .distinct()
@@ -135,28 +116,26 @@ public class PurchasingFacade {
             throw new CoreException(ErrorType.BAD_REQUEST, "상품이 중복되었습니다.");
         }
 
-        // 정렬된 순서대로 상품 락 획득 (Deadlock 방지)
+        // 상품 조회 (재고 검증은 이벤트 핸들러에서 처리)
         Map<Long, Product> productMap = new java.util.HashMap<>();
-
         for (Long productId : sortedProductIds) {
-            // 비관적 락을 사용하여 상품 조회 (재고 차감 시 동시성 제어)
-            // - id는 PK 인덱스가 있어 Lock 범위 최소화 (Record Lock만 적용)
-            // - Lost Update 방지: 동시 주문 시 재고 음수 방지 및 정확한 차감 보장 (재고 oversell 방지)
-            // - 트랜잭션 내부에 외부 I/O 없음, lock holding time 매우 짧음
-            // - ✅ 정렬된 순서로 락 획득하여 deadlock 방지
-            Product product = productRepository.findByIdForUpdate(productId)
-                .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                    String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", productId)));
+            Product product = productService.getProduct(productId);
             productMap.put(productId, product);
         }
 
-        // OrderItem 생성
-        List<Product> products = new ArrayList<>();
+        // OrderItem 생성 및 재고 사전 검증
         List<OrderItem> orderItems = new ArrayList<>();
         for (OrderItemCommand command : commands) {
             Product product = productMap.get(command.productId());
-            products.add(product);
-
+            
+            // ✅ 재고 사전 검증 (읽기 전용 조회이므로 EDA 원칙 위반 아님)
+            // 재고 차감은 여전히 ProductEventHandler에서 처리
+            int currentStock = product.getStock();
+            if (currentStock < command.quantity()) {
+                throw new CoreException(ErrorType.BAD_REQUEST,
+                    String.format("재고가 부족합니다. (현재 재고: %d, 요청 수량: %d)", currentStock, command.quantity()));
+            }
+            
             orderItems.add(OrderItem.of(
                 product.getId(),
                 product.getName(),
@@ -165,57 +144,67 @@ public class PurchasingFacade {
             ));
         }
 
-        // 쿠폰 처리 (있는 경우)
+        // 쿠폰 코드 추출
         String couponCode = extractCouponCode(commands);
-        Integer discountAmount = 0;
-        if (couponCode != null && !couponCode.isBlank()) {
-            discountAmount = applyCoupon(user.getId(), couponCode, calculateSubtotal(orderItems));
-        }
+        Integer subtotal = calculateSubtotal(orderItems);
 
-        Order order = Order.of(user.getId(), orderItems, couponCode, discountAmount);
-        // 주문은 PENDING 상태로 생성됨 (Order 생성자에서 기본값으로 설정)
-        // 결제 성공 후에만 COMPLETED로 변경됨
+        // 포인트 사용량
+        Long usedPointAmount = Objects.requireNonNullElse(usedPoint, 0L);
 
-        decreaseStocksForOrderItems(order.getItems(), products);
-        deductUserPoint(user, order.getTotalAmount());
-        // 주문은 PENDING 상태로 유지 (결제 요청 중 상태)
-        // 결제 성공 시 콜백이나 상태 확인 API를 통해 COMPLETED로 변경됨
-
-        products.forEach(productRepository::save);
-        userRepository.save(user);
-
-        Order savedOrder = orderRepository.save(order);
-        // 주문은 PENDING 상태로 저장됨
-
-        // PG 결제 요청을 트랜잭션 커밋 후에 실행하여 DB 커넥션 풀 고갈 방지
-        // 트랜잭션 내에서 외부 HTTP 호출을 하면 PG 지연/타임아웃 시 DB 커넥션이 오래 유지되어 커넥션 풀 고갈 위험
-        Long orderId = savedOrder.getId();
-        Integer totalAmount = savedOrder.getTotalAmount();
-        TransactionSynchronizationManager.registerSynchronization(
-            new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    // 트랜잭션 커밋 후 PG 호출 (DB 커넥션 해제 후 실행)
-                    try {
-                        String transactionKey = requestPaymentToGateway(userId, orderId, cardType, cardNo, totalAmount);
-                        if (transactionKey != null) {
-                            // 결제 성공: 별도 트랜잭션에서 주문 상태를 COMPLETED로 변경
-                            updateOrderStatusToCompleted(orderId, transactionKey);
-                            log.info("PG 결제 요청 완료. (orderId: {}, transactionKey: {})", orderId, transactionKey);
-                        } else {
-                            // PG 요청 실패: 외부 시스템 장애로 간주
-                            // 주문은 PENDING 상태로 유지되어 나중에 상태 확인 API나 콜백으로 복구 가능
-                            log.info("PG 결제 요청 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
-                        }
-                    } catch (Exception e) {
-                        // PG 요청 중 예외 발생 시에도 주문은 이미 저장되어 있으므로 유지
-                        // 외부 시스템 장애는 내부 시스템에 영향을 주지 않도록 함
-                        log.error("PG 결제 요청 중 예외 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", 
-                            orderId, e);
-                    }
-                }
-            }
+        // ✅ CreateOrderCommand 생성
+        CreateOrderCommand createOrderCommand = new CreateOrderCommand(
+            user.getId(),
+            orderItems,
+            couponCode,
+            subtotal,
+            usedPointAmount
         );
+
+        // ✅ OrderService.create() 호출 → OrderEvent.OrderCreated 이벤트 발행
+        // ✅ ProductEventHandler가 OrderEvent.OrderCreated를 구독하여 재고 차감 처리
+        // ✅ CouponEventHandler가 OrderEvent.OrderCreated를 구독하여 쿠폰 적용 처리
+        // ✅ PointEventHandler가 OrderEvent.OrderCreated를 구독하여 포인트 차감 처리
+        Order savedOrder = orderService.create(createOrderCommand);
+
+        // PG 결제 금액 계산
+        // 주의: 쿠폰 할인은 비동기로 적용되므로, PaymentEvent.PaymentRequested 발행 시점에는 할인 전 금액(subtotal)을 사용
+        // 쿠폰 할인이 적용된 후에는 OrderEventHandler가 주문의 totalAmount를 업데이트함
+        Long totalAmount = subtotal.longValue(); // 쿠폰 할인 전 금액 사용
+        Long paidAmount = totalAmount - usedPointAmount;
+
+        // ✅ 결제 요청 시 PaymentEvent.PaymentRequested 이벤트 발행
+        // ✅ PaymentEventHandler가 PaymentEvent.PaymentRequested를 구독하여 Payment 생성 및 PG 결제 요청 처리
+        if (paidAmount.equals(0L)) {
+            // 포인트+쿠폰으로 전액 결제 완료된 경우
+            // PaymentEventHandler가 Payment를 생성하고 바로 완료 처리
+            paymentEventPublisher.publish(PaymentEvent.PaymentRequested.of(
+                savedOrder.getId(),
+                userId,
+                user.getId(),
+                totalAmount,
+                usedPointAmount,
+                null,
+                null
+            ));
+            log.debug("포인트+쿠폰으로 전액 결제 요청. (orderId: {})", savedOrder.getId());
+        } else {
+            // PG 결제가 필요한 경우
+            if (cardType == null || cardType.isBlank() || cardNo == null || cardNo.isBlank()) {
+                throw new CoreException(ErrorType.BAD_REQUEST,
+                    "포인트와 쿠폰만으로 결제할 수 없습니다. 카드 정보를 입력해주세요.");
+            }
+
+            paymentEventPublisher.publish(PaymentEvent.PaymentRequested.of(
+                savedOrder.getId(),
+                userId,
+                user.getId(),
+                totalAmount,
+                usedPointAmount,
+                cardType,
+                cardNo
+            ));
+            log.debug("PG 결제 요청. (orderId: {})", savedOrder.getId());
+        }
 
         return OrderInfo.from(savedOrder);
     }
@@ -223,20 +212,13 @@ public class PurchasingFacade {
     /**
      * 주문을 취소하고 포인트를 환불하며 재고를 원복한다.
      * <p>
-     * <b>동시성 제어:</b>
+     * <b>EDA 원칙:</b>
      * <ul>
-     *   <li><b>비관적 락 사용:</b> 재고 원복 시 동시성 제어를 위해 findByIdForUpdate 사용</li>
-     *   <li><b>Deadlock 방지:</b> 상품 ID를 정렬하여 일관된 락 획득 순서 보장</li>
+     *   <li><b>이벤트 기반:</b> OrderService.cancelOrder()가 OrderEvent.OrderCanceled 이벤트를 발행</li>
+     *   <li><b>이벤트 기반:</b> 재고 원복은 OrderEvent.OrderCanceled를 구독하는 ProductEventHandler에서 처리</li>
+     *   <li><b>이벤트 기반:</b> 포인트 환불은 OrderEvent.OrderCanceled를 구독하는 PointEventHandler에서 처리</li>
+     *   <li><b>느슨한 결합:</b> Product, User 애그리거트를 직접 수정하지 않고 이벤트만 발행</li>
      * </ul>
-     * </p>
-     *
-     * @param order 주문 엔티티
-     * @param user 사용자 엔티티
-     */
-    /**
-     * 주문을 취소하고 포인트를 환불하며 재고를 원복한다.
-     * <p>
-     * OrderCancellationService를 사용하여 처리합니다.
      * </p>
      *
      * @param order 주문 엔티티
@@ -244,7 +226,21 @@ public class PurchasingFacade {
      */
     @Transactional
     public void cancelOrder(Order order, User user) {
-        orderCancellationService.cancel(order, user);
+        if (order == null || user == null) {
+            throw new CoreException(ErrorType.BAD_REQUEST, "취소할 주문과 사용자 정보는 필수입니다.");
+        }
+
+        // 실제로 사용된 포인트만 환불 (Payment에서 확인)
+        Long refundPointAmount = paymentService.getPaymentByOrderId(order.getId())
+            .map(Payment::getUsedPoint)
+            .orElse(0L);
+
+        // ✅ OrderService.cancelOrder() 호출 → OrderEvent.OrderCanceled 이벤트 발행
+        // ✅ ProductEventHandler가 OrderEvent.OrderCanceled를 구독하여 재고 원복 처리
+        // ✅ PointEventHandler가 OrderEvent.OrderCanceled를 구독하여 포인트 환불 처리
+        orderService.cancelOrder(order.getId(), "사용자 요청", refundPointAmount);
+        
+        log.info("주문 취소 처리 완료. (orderId: {}, refundPointAmount: {})", order.getId(), refundPointAmount);
     }
 
     /**
@@ -255,8 +251,8 @@ public class PurchasingFacade {
      */
     @Transactional(readOnly = true)
     public List<OrderInfo> getOrders(String userId) {
-        User user = loadUser(userId);
-        List<Order> orders = orderRepository.findAllByUserId(user.getId());
+        User user = userService.getUser(userId);
+        List<Order> orders = orderService.getOrdersByUserId(user.getId());
         return orders.stream()
             .map(OrderInfo::from)
             .toList();
@@ -271,9 +267,8 @@ public class PurchasingFacade {
      */
     @Transactional(readOnly = true)
     public OrderInfo getOrder(String userId, Long orderId) {
-        User user = loadUser(userId);
-        Order order = orderRepository.findById(orderId)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND, "주문을 찾을 수 없습니다."));
+        User user = userService.getUser(userId);
+        Order order = orderService.getById(orderId);
 
         if (!order.getUserId().equals(user.getId())) {
             throw new CoreException(ErrorType.NOT_FOUND, "주문을 찾을 수 없습니다.");
@@ -282,56 +277,7 @@ public class PurchasingFacade {
         return OrderInfo.from(order);
     }
 
-    private void decreaseStocksForOrderItems(List<OrderItem> items, List<Product> products) {
-        Map<Long, Product> productMap = products.stream()
-            .collect(Collectors.toMap(Product::getId, product -> product));
 
-        for (OrderItem item : items) {
-            Product product = productMap.get(item.getProductId());
-            if (product == null) {
-                throw new CoreException(ErrorType.NOT_FOUND,
-                    String.format("상품을 찾을 수 없습니다. (상품 ID: %d)", item.getProductId()));
-            }
-            product.decreaseStock(item.getQuantity());
-        }
-    }
-
-
-    private void deductUserPoint(User user, Integer totalAmount) {
-        if (Objects.requireNonNullElse(totalAmount, 0) <= 0) {
-            return;
-        }
-        user.deductPoint(Point.of(totalAmount.longValue()));
-    }
-
-    private User loadUser(String userId) {
-        User user = userRepository.findByUserId(userId);
-        if (user == null) {
-            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
-        }
-        return user;
-    }
-
-    /**
-     * 비관적 락을 사용하여 사용자를 조회합니다.
-     * <p>
-     * 포인트 차감 등 동시성 제어가 필요한 경우 사용합니다.
-     * </p>
-     * <p>
-     * <b>전제 조건:</b> userId는 상위 계층에서 이미 null/blank 검증이 완료되어야 합니다.
-     * </p>
-     *
-     * @param userId 사용자 ID (null이 아니고 비어있지 않아야 함)
-     * @return 조회된 사용자
-     * @throws CoreException 사용자를 찾을 수 없는 경우
-     */
-    private User loadUserForUpdate(String userId) {
-        User user = userRepository.findByUserIdForUpdate(userId);
-        if (user == null) {
-            throw new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다.");
-        }
-        return user;
-    }
 
     /**
      * 주문 명령에서 쿠폰 코드를 추출합니다.
@@ -347,60 +293,6 @@ public class PurchasingFacade {
             .orElse(null);
     }
 
-    /**
-     * 쿠폰을 적용하여 할인 금액을 계산하고 쿠폰을 사용 처리합니다.
-     * <p>
-     * <b>동시성 제어 전략:</b>
-     * <ul>
-     *   <li><b>OPTIMISTIC_LOCK 사용 근거:</b> 쿠폰 중복 사용 방지, Hot Spot 대응</li>
-     *   <li><b>@Version 필드:</b> UserCoupon 엔티티의 version 필드를 통해 자동으로 낙관적 락 적용</li>
-     *   <li><b>동시 사용 시:</b> 한 명만 성공하고 나머지는 OptimisticLockException 발생</li>
-     *   <li><b>사용 목적:</b> 동일 쿠폰으로 여러 기기에서 동시 주문해도 한 번만 사용되도록 보장</li>
-     * </ul>
-     * </p>
-     *
-     * @param userId 사용자 ID
-     * @param couponCode 쿠폰 코드
-     * @param subtotal 주문 소계 금액
-     * @return 할인 금액
-     * @throws CoreException 쿠폰을 찾을 수 없거나 사용 불가능한 경우, 동시 사용으로 인한 충돌 시
-     */
-    private Integer applyCoupon(Long userId, String couponCode, Integer subtotal) {
-        // 쿠폰 존재 여부 확인
-        Coupon coupon = couponRepository.findByCode(couponCode)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                String.format("쿠폰을 찾을 수 없습니다. (쿠폰 코드: %s)", couponCode)));
-
-        // 낙관적 락을 사용하여 사용자 쿠폰 조회 (동시성 제어)
-        // @Version 필드가 있어 자동으로 낙관적 락이 적용됨
-        UserCoupon userCoupon = userCouponRepository.findByUserIdAndCouponCodeForUpdate(userId, couponCode)
-            .orElseThrow(() -> new CoreException(ErrorType.NOT_FOUND,
-                String.format("사용자가 소유한 쿠폰을 찾을 수 없습니다. (쿠폰 코드: %s)", couponCode)));
-
-        // 쿠폰 사용 가능 여부 확인
-        if (!userCoupon.isAvailable()) {
-            throw new CoreException(ErrorType.BAD_REQUEST,
-                String.format("이미 사용된 쿠폰입니다. (쿠폰 코드: %s)", couponCode));
-        }
-
-        // 쿠폰 사용 처리
-        userCoupon.use();
-
-        // 할인 금액 계산 (전략 패턴 사용)
-        Integer discountAmount = coupon.calculateDiscountAmount(subtotal, couponDiscountStrategyFactory);
-
-        try {
-            // 사용자 쿠폰 저장 (version 체크 자동 수행)
-            // 다른 트랜잭션이 먼저 수정했다면 OptimisticLockException 발생
-            userCouponRepository.save(userCoupon);
-        } catch (ObjectOptimisticLockingFailureException e) {
-            // 낙관적 락 충돌: 다른 트랜잭션이 먼저 쿠폰을 사용함
-            throw new CoreException(ErrorType.CONFLICT,
-                String.format("쿠폰이 이미 사용되었습니다. (쿠폰 코드: %s)", couponCode));
-        }
-
-        return discountAmount;
-    }
 
     /**
      * 주문 아이템 목록으로부터 소계 금액을 계산합니다.
@@ -414,91 +306,110 @@ public class PurchasingFacade {
             .sum();
     }
 
+
     /**
-     * 주문 상태를 COMPLETED로 업데이트합니다.
-     * <p>
-     * 트랜잭션 커밋 후 별도 트랜잭션에서 실행되어 주문 상태를 업데이트합니다.
-     * </p>
+     * PaymentGatewayDto.TransactionStatus를 PaymentStatus 도메인 모델로 변환합니다.
      *
-     * @param orderId 주문 ID
-     * @param transactionKey 트랜잭션 키
+     * @param transactionStatus 인프라 계층의 TransactionStatus
+     * @return 도메인 모델의 PaymentStatus
      */
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
-    public void updateOrderStatusToCompleted(Long orderId, String transactionKey) {
-        Order order = orderRepository.findById(orderId).orElse(null);
-        if (order == null) {
-            log.warn("주문 상태 업데이트 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
-            return;
-        }
-        
-        if (order.getStatus() == OrderStatus.COMPLETED) {
-            log.info("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
-            return;
-        }
-        
-        order.complete();
-        orderRepository.save(order);
-        log.info("주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})", orderId, transactionKey);
+    private PaymentStatus convertToPaymentStatus(
+        PaymentGatewayDto.TransactionStatus transactionStatus
+    ) {
+        return switch (transactionStatus) {
+            case SUCCESS -> PaymentStatus.SUCCESS;
+            case FAILED -> PaymentStatus.FAILED;
+            case PENDING -> PaymentStatus.PENDING;
+        };
     }
     
     /**
-     * PG 결제 게이트웨이에 결제 요청을 전송합니다.
+     * PaymentStatus 도메인 모델을 PaymentGatewayDto.TransactionStatus로 변환합니다.
+     *
+     * @param paymentStatus 도메인 모델의 PaymentStatus
+     * @return 인프라 계층의 TransactionStatus
+     */
+    private PaymentGatewayDto.TransactionStatus convertToInfraStatus(PaymentStatus paymentStatus) {
+        return switch (paymentStatus) {
+            case SUCCESS -> PaymentGatewayDto.TransactionStatus.SUCCESS;
+            case FAILED -> PaymentGatewayDto.TransactionStatus.FAILED;
+            case PENDING -> PaymentGatewayDto.TransactionStatus.PENDING;
+        };
+    }
+
+    /**
+     * 결제 상태에 따라 주문 상태를 업데이트합니다.
      * <p>
-     * 트랜잭션 커밋 후 실행되어 DB 커넥션 풀 고갈을 방지합니다.
-     * 실패 시에도 주문은 이미 저장되어 있으므로, 로그만 기록합니다.
+     * 별도 트랜잭션으로 실행하여 외부 시스템 호출과 독립적으로 처리합니다.
      * </p>
      *
-     * @param userId 사용자 ID
      * @param orderId 주문 ID
-     * @param cardType 카드 타입
-     * @param cardNo 카드 번호
-     * @param amount 결제 금액
-     * @return transactionKey (성공 시), null (실패 시)
+     * @param paymentStatus 결제 상태 (도메인 모델)
+     * @param transactionKey 트랜잭션 키
+     * @param reason 실패 사유 (실패 시)
+     * @return 업데이트 성공 여부 (true: 성공, false: 실패)
      */
-    private String requestPaymentToGateway(String userId, Long orderId, String cardType, String cardNo, Integer amount) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean updateOrderStatusByPaymentResult(
+        Long orderId,
+        PaymentStatus paymentStatus,
+        String transactionKey,
+        String reason
+    ) {
         try {
-            // 결제 요청 생성
-            PaymentRequest request = paymentRequestBuilder.build(userId, orderId, cardType, cardNo, amount);
+            Order order = orderService.getOrder(orderId).orElse(null);
             
-            // PG 결제 요청 전송
-            var result = paymentGatewayAdapter.requestPayment(request);
+            if (order == null) {
+                log.warn("주문 상태 업데이트 시 주문을 찾을 수 없습니다. (orderId: {})", orderId);
+                return false;
+            }
             
-            // 결과 처리
-            return result.handle(
-                success -> {
-                    log.info("PG 결제 요청 성공. (orderId: {}, transactionKey: {})",
-                        orderId, success.transactionKey());
-                    return success.transactionKey();
-                },
-                failure -> {
-                    PaymentFailureType failureType = paymentFailureClassifier.classify(failure.errorCode());
-                    
-                    if (failureType == PaymentFailureType.BUSINESS_FAILURE) {
-                        // 비즈니스 실패: 주문 취소 (별도 트랜잭션으로 처리)
-                        paymentFailureHandler.handle(userId, orderId, failure.errorCode(), failure.message());
-                    } else if (failure.isTimeout()) {
-                        // 타임아웃: 상태 확인 후 복구
-                        log.info("타임아웃 발생. PG 결제 상태 확인 API를 호출하여 실제 결제 상태를 확인합니다. (orderId: {})", orderId);
-                        paymentRecoveryService.recoverAfterTimeout(userId, orderId);
-                    } else {
-                        // 외부 시스템 장애: 주문은 PENDING 상태로 유지
-                        log.info("외부 시스템 장애로 인한 실패. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, errorCode: {})",
-                            orderId, failure.errorCode());
-                    }
-                    return null;
-                }
-            );
-        } catch (CoreException e) {
-            // 잘못된 카드 타입 등 검증 오류
-            log.warn("결제 요청 생성 실패. (orderId: {}, error: {})", orderId, e.getMessage());
-            return null;
+            // 이미 완료되거나 취소된 주문인 경우 처리하지 않음 (정상적인 경우이므로 true 반환)
+            if (order.isCompleted()) {
+                log.debug("이미 완료된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return true;
+            }
+            
+            if (order.isCanceled()) {
+                log.debug("이미 취소된 주문입니다. 상태 업데이트를 건너뜁니다. (orderId: {})", orderId);
+                return true;
+            }
+            
+            if (paymentStatus == PaymentStatus.SUCCESS) {
+                // 결제 성공: 주문 완료
+                orderService.updateStatusByPaymentResult(order, paymentStatus, null, null);
+                log.info("결제 상태 확인 결과, 주문 상태를 COMPLETED로 업데이트했습니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+                return true;
+            } else if (paymentStatus == PaymentStatus.FAILED) {
+                // 결제 실패: 주문 취소 및 리소스 원복
+                // 실제로 사용된 포인트만 환불 (Payment에서 확인)
+                Long refundPointAmount = paymentService.getPaymentByOrderId(order.getId())
+                    .map(Payment::getUsedPoint)
+                    .orElse(0L);
+                
+                // 취소 사유 설정 (reason이 없으면 기본값 사용)
+                String cancelReason = (reason != null && !reason.isBlank()) 
+                    ? reason 
+                    : "결제 실패";
+                
+                // 주문 취소 처리 (이벤트 발행 포함)
+                orderService.updateStatusByPaymentResult(order, paymentStatus, cancelReason, refundPointAmount);
+                log.info("결제 상태 확인 결과, 주문 상태를 CANCELED로 업데이트했습니다. (orderId: {}, transactionKey: {}, reason: {}, refundPointAmount: {})",
+                    orderId, transactionKey, cancelReason, refundPointAmount);
+                return true;
+            } else {
+                // PENDING 상태: 아직 처리 중 (정상적인 경우이므로 true 반환)
+                log.debug("결제 상태 확인 결과, 아직 처리 중입니다. 주문은 PENDING 상태로 유지됩니다. (orderId: {}, transactionKey: {})",
+                    orderId, transactionKey);
+                return true;
+            }
         } catch (Exception e) {
-            // 기타 예외 처리
-            log.error("PG 결제 요청 중 예상치 못한 오류 발생. (orderId: {})", orderId, e);
-            log.info("예상치 못한 오류 발생. 주문은 PENDING 상태로 유지됩니다. (orderId: {})", orderId);
-            return null;
+            log.error("주문 상태 업데이트 중 오류 발생. (orderId: {})", orderId, e);
+            return false;
         }
     }
+
 
 
     /**
@@ -531,24 +442,24 @@ public class PurchasingFacade {
     public void handlePaymentCallback(Long orderId, PaymentGatewayDto.CallbackRequest callbackRequest) {
         try {
             // 주문 조회
-            Order order = orderRepository.findById(orderId)
-                .orElse(null);
-            
-            if (order == null) {
+            Order order;
+            try {
+                order = orderService.getById(orderId);
+            } catch (CoreException e) {
                 log.warn("콜백 처리 시 주문을 찾을 수 없습니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
             
             // 이미 완료되거나 취소된 주문인 경우 처리하지 않음
-            if (order.getStatus() == OrderStatus.COMPLETED) {
-                log.info("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+            if (order.isCompleted()) {
+                log.debug("이미 완료된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
             
-            if (order.getStatus() == OrderStatus.CANCELED) {
-                log.info("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
+            if (order.isCanceled()) {
+                log.debug("이미 취소된 주문입니다. 콜백 처리를 건너뜁니다. (orderId: {}, transactionKey: {})",
                     orderId, callbackRequest.transactionKey());
                 return;
             }
@@ -558,10 +469,19 @@ public class PurchasingFacade {
             PaymentGatewayDto.TransactionStatus verifiedStatus = verifyCallbackWithPgInquiry(
                 order.getUserId(), orderId, callbackRequest);
             
-            // OrderStatusUpdater를 사용하여 상태 업데이트
-            boolean updated = orderStatusUpdater.updateByPaymentStatus(
+            // PaymentService를 통한 콜백 처리 (도메인 모델로 변환)
+            PaymentStatus paymentStatus = convertToPaymentStatus(verifiedStatus);
+            paymentService.handleCallback(
                 orderId,
-                verifiedStatus,
+                callbackRequest.transactionKey(),
+                paymentStatus,
+                callbackRequest.reason()
+            );
+            
+            // 주문 상태 업데이트 처리
+            boolean updated = updateOrderStatusByPaymentResult(
+                orderId,
+                paymentStatus,
                 callbackRequest.transactionKey(),
                 callbackRequest.reason()
             );
@@ -606,8 +526,10 @@ public class PurchasingFacade {
         
         try {
             // User의 userId (String)를 가져오기 위해 User 조회
-            User user = userRepository.findById(userId);
-            if (user == null) {
+            User user;
+            try {
+                user = userService.getUserById(userId);
+            } catch (CoreException e) {
                 log.warn("콜백 검증 시 사용자를 찾을 수 없습니다. 콜백 정보를 사용합니다. (orderId: {}, userId: {})",
                     orderId, userId);
                 return callbackRequest.status(); // 사용자를 찾을 수 없으면 콜백 정보 사용
@@ -615,27 +537,11 @@ public class PurchasingFacade {
             
             String userIdString = user.getUserId();
             
-            // PG에서 주문별 결제 정보 조회 (스케줄러 전용 클라이언트 사용 - Retry 적용)
-            // 주문 ID를 6자리 이상 문자열로 변환 (pg-simulator 검증 요구사항)
-            String orderIdString = paymentRequestBuilder.formatOrderId(orderId);
-            PaymentGatewayDto.ApiResponse<PaymentGatewayDto.OrderResponse> response =
-                paymentGatewaySchedulerClient.getTransactionsByOrder(userIdString, orderIdString);
+            // PaymentService를 통한 결제 상태 조회 (PG 원장 기준)
+            PaymentStatus paymentStatus = paymentService.getPaymentStatus(userIdString, orderId);
             
-            if (response == null || response.meta() == null
-                || response.meta().result() != PaymentGatewayDto.ApiResponse.Metadata.Result.SUCCESS
-                || response.data() == null || response.data().transactions() == null
-                || response.data().transactions().isEmpty()) {
-                // PG 조회 실패: 콜백 정보를 사용하되 경고 로그 기록
-                log.warn("콜백 검증 시 PG 조회 API 호출 실패. 콜백 정보를 사용합니다. (orderId: {}, transactionKey: {})",
-                    orderId, callbackRequest.transactionKey());
-                return callbackRequest.status();
-            }
-            
-            // 가장 최근 트랜잭션의 상태 확인 (PG 원장 기준)
-            PaymentGatewayDto.TransactionResponse latestTransaction = 
-                response.data().transactions().get(response.data().transactions().size() - 1);
-            
-            PaymentGatewayDto.TransactionStatus pgStatus = latestTransaction.status();
+            // 도메인 모델을 인프라 DTO로 변환 (검증 로직에서 사용)
+            PaymentGatewayDto.TransactionStatus pgStatus = convertToInfraStatus(paymentStatus);
             PaymentGatewayDto.TransactionStatus callbackStatus = callbackRequest.status();
             
             // 콜백 정보와 PG 조회 결과 비교
@@ -680,14 +586,14 @@ public class PurchasingFacade {
     @Transactional
     public void recoverOrderStatusByPaymentCheck(String userId, Long orderId) {
         try {
-            // PG에서 결제 상태 조회
-            // 주문 ID를 6자리 이상 문자열로 변환 (pg-simulator 검증 요구사항)
-            String orderIdString = paymentRequestBuilder.formatOrderId(orderId);
-            PaymentGatewayDto.TransactionStatus status = 
-                paymentGatewayAdapter.getPaymentStatus(userId, orderIdString);
+            // PaymentService를 통한 타임아웃 복구
+            paymentService.recoverAfterTimeout(userId, orderId);
             
-            // OrderStatusUpdater를 사용하여 상태 업데이트
-            boolean updated = orderStatusUpdater.updateByPaymentStatus(orderId, status, null, null);
+            // 결제 상태 조회
+            PaymentStatus paymentStatus = paymentService.getPaymentStatus(userId, orderId);
+            
+            // 주문 상태 업데이트 처리
+            boolean updated = updateOrderStatusByPaymentResult(orderId, paymentStatus, null, null);
             
             if (!updated) {
                 log.warn("상태 복구 실패. 주문 상태 업데이트에 실패했습니다. (orderId: {})", orderId);

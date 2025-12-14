@@ -11,8 +11,8 @@ import com.loopers.domain.user.Gender;
 import com.loopers.domain.user.Point;
 import com.loopers.domain.user.User;
 import com.loopers.domain.user.UserRepository;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayClient;
-import com.loopers.infrastructure.paymentgateway.PaymentGatewayDto;
+import com.loopers.infrastructure.payment.PaymentGatewayClient;
+import com.loopers.infrastructure.payment.PaymentGatewayDto;
 import com.loopers.utils.DatabaseCleanUp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -111,6 +111,7 @@ class PurchasingFacadePaymentGatewayTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -122,9 +123,9 @@ class PurchasingFacadePaymentGatewayTest {
         Product savedProduct = productRepository.findById(product.getId()).orElseThrow();
         assertThat(savedProduct.getStock()).isEqualTo(9);
         
-        // 포인트는 차감되었는지 확인
+        // 포인트 차감 확인 (usedPoint가 null이므로 포인트 차감 없음)
         User savedUser = userRepository.findByUserId(user.getUserId());
-        assertThat(savedUser.getPoint().getValue()).isEqualTo(40_000L);
+        assertThat(savedUser.getPoint().getValue()).isEqualTo(50_000L); // 포인트 차감 없음
         
         // 주문이 저장되었는지 확인
         Order savedOrder = orderRepository.findById(orderInfo.orderId()).orElseThrow();
@@ -160,6 +161,7 @@ class PurchasingFacadePaymentGatewayTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -197,6 +199,7 @@ class PurchasingFacadePaymentGatewayTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -234,6 +237,7 @@ class PurchasingFacadePaymentGatewayTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );
@@ -266,6 +270,7 @@ class PurchasingFacadePaymentGatewayTest {
         OrderInfo orderInfo = purchasingFacade.createOrder(
             user.getUserId(),
             commands,
+            null,
             "SAMSUNG",
             "4111-1111-1111-1111" // 유효한 Luhn 알고리즘 통과 카드 번호
         );

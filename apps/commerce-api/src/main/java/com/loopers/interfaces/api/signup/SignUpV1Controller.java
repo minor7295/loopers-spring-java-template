@@ -1,8 +1,12 @@
 package com.loopers.interfaces.api.signup;
 
-import com.loopers.application.signup.SignUpFacade;
-import com.loopers.application.signup.SignUpInfo;
+import com.loopers.application.user.UserService;
+import com.loopers.domain.user.Gender;
+import com.loopers.domain.user.Point;
+import com.loopers.domain.user.User;
 import com.loopers.interfaces.api.ApiResponse;
+import com.loopers.support.error.CoreException;
+import com.loopers.support.error.ErrorType;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/signup")
 public class SignUpV1Controller {
 
-    private final SignUpFacade signUpFacade;
+    private final UserService userService;
 
     /**
      * 회원가입을 처리합니다.
@@ -37,13 +41,33 @@ public class SignUpV1Controller {
     public ApiResponse<SignUpV1Dto.SignupResponse> signUp(
         @Valid @RequestBody SignUpV1Dto.SignUpRequest request
     ) {
-        SignUpInfo info = signUpFacade.signUp(
+        Gender gender = parseGender(request.gender());
+        User user = userService.create(
             request.userId(),
             request.email(),
             request.birthDate(),
-            request.gender()
+            gender,
+            Point.of(0L)
         );
-        SignUpV1Dto.SignupResponse response = SignUpV1Dto.SignupResponse.from(info);
+        SignUpV1Dto.SignupResponse response = SignUpV1Dto.SignupResponse.from(user);
         return ApiResponse.success(response);
+    }
+
+    /**
+     * 성별 문자열을 Gender enum으로 변환합니다.
+     *
+     * @param genderStr 성별 문자열 (MALE 또는 FEMALE)
+     * @return Gender enum
+     * @throws CoreException 유효하지 않은 성별 값인 경우
+     */
+    private Gender parseGender(String genderStr) {
+        try {
+            return Gender.valueOf(genderStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new CoreException(
+                ErrorType.BAD_REQUEST,
+                String.format("유효하지 않은 성별입니다. (gender: %s)", genderStr)
+            );
+        }
     }
 }
