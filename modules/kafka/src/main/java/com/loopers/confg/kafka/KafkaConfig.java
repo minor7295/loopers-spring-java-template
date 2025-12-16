@@ -76,22 +76,6 @@ public class KafkaConfig {
     }
 
     /**
-     * KafkaAdmin Bean.
-     * <p>
-     * Kafka 토픽 관리를 위한 Admin 클라이언트입니다.
-     * 애플리케이션 시작 시 NewTopic Bean들을 통해 토픽을 자동 생성합니다.
-     * </p>
-     *
-     * @param kafkaProperties Kafka 설정 속성
-     * @return KafkaAdmin 인스턴스
-     */
-    @Bean
-    public KafkaAdmin kafkaAdmin(KafkaProperties kafkaProperties) {
-        Map<String, Object> configs = new HashMap<>(kafkaProperties.buildAdminProperties());
-        return new KafkaAdmin(configs);
-    }
-
-    /**
      * Like 도메인 이벤트 토픽.
      * <p>
      * 파티션 키: productId (상품별 좋아요 수 집계를 위해)
