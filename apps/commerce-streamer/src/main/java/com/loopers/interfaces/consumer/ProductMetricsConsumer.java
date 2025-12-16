@@ -3,8 +3,9 @@ package com.loopers.interfaces.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.application.metrics.ProductMetricsService;
 import com.loopers.confg.kafka.KafkaConfig;
-import com.loopers.domain.like.LikeEvent;
-import com.loopers.domain.order.OrderEvent;
+import com.loopers.domain.event.LikeEvent;
+import com.loopers.domain.event.OrderEvent;
+import com.loopers.domain.event.ProductEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -25,6 +26,7 @@ import java.util.List;
  * <ul>
  *   <li><b>like-events:</b> LikeAdded, LikeRemoved (좋아요 수 집계)</li>
  *   <li><b>order-events:</b> OrderCreated (판매량 집계)</li>
+ *   <li><b>product-events:</b> ProductViewed (조회 수 집계)</li>
  * </ul>
  * </p>
  * <p>
@@ -155,6 +157,44 @@ public class ProductMetricsConsumer {
     }
 
     /**
+     * product-events 토픽을 구독하여 조회 수를 집계합니다.
+     *
+     * @param records Kafka 메시지 레코드 목록
+     * @param acknowledgment 수동 커밋을 위한 Acknowledgment
+     */
+    @KafkaListener(
+        topics = "product-events",
+        containerFactory = KafkaConfig.BATCH_LISTENER
+    )
+    public void consumeProductEvents(
+        List<ConsumerRecord<String, Object>> records,
+        Acknowledgment acknowledgment
+    ) {
+        try {
+            for (ConsumerRecord<String, Object> record : records) {
+                try {
+                    Object value = record.value();
+                    ProductEvent.ProductViewed event = parseProductViewedEvent(value);
+                    
+                    productMetricsService.incrementViewCount(event.productId());
+                } catch (Exception e) {
+                    log.error("상품 조회 이벤트 처리 실패: offset={}, partition={}", 
+                        record.offset(), record.partition(), e);
+                    // 개별 이벤트 처리 실패는 로그만 기록하고 계속 진행
+                }
+            }
+            
+            // 모든 이벤트 처리 완료 후 수동 커밋
+            acknowledgment.acknowledge();
+            log.debug("상품 조회 이벤트 처리 완료: count={}", records.size());
+        } catch (Exception e) {
+            log.error("상품 조회 이벤트 배치 처리 실패: count={}", records.size(), e);
+            // 에러 발생 시 커밋하지 않음 (재처리 가능)
+            throw e;
+        }
+    }
+
+    /**
      * Kafka 메시지 값을 OrderCreated 이벤트로 파싱합니다.
      *
      * @param value Kafka 메시지 값
@@ -171,6 +211,26 @@ public class ProductMetricsConsumer {
             return objectMapper.readValue(json, OrderEvent.OrderCreated.class);
         } catch (Exception e) {
             throw new RuntimeException("OrderCreated 이벤트 파싱 실패", e);
+        }
+    }
+
+    /**
+     * Kafka 메시지 값을 ProductViewed 이벤트로 파싱합니다.
+     *
+     * @param value Kafka 메시지 값
+     * @return 파싱된 ProductViewed 이벤트
+     */
+    private ProductEvent.ProductViewed parseProductViewedEvent(Object value) {
+        try {
+            if (value instanceof ProductEvent.ProductViewed) {
+                return (ProductEvent.ProductViewed) value;
+            }
+            
+            // JSON 문자열인 경우 파싱
+            String json = value instanceof String ? (String) value : objectMapper.writeValueAsString(value);
+            return objectMapper.readValue(json, ProductEvent.ProductViewed.class);
+        } catch (Exception e) {
+            throw new RuntimeException("ProductViewed 이벤트 파싱 실패", e);
         }
     }
 }

@@ -2,8 +2,8 @@ package com.loopers.interfaces.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.application.metrics.ProductMetricsService;
-import com.loopers.domain.like.LikeEvent;
-import com.loopers.domain.order.OrderEvent;
+import com.loopers.domain.event.LikeEvent;
+import com.loopers.domain.event.OrderEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

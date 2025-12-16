@@ -1,4 +1,4 @@
-package com.loopers.infrastructure.metric;
+package com.loopers.infrastructure.metrics;
 
 import com.loopers.domain.metrics.ProductMetrics;
 import com.loopers.domain.metrics.ProductMetricsRepository;
