@@ -37,7 +37,7 @@ spring:
     admin:
       properties:
         bootstrap.servers: kafka:9092
-
+      auto-create: true
 ---
 spring.config.activate.on-profile: dev
 
