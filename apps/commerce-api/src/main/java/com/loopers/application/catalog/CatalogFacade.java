@@ -12,6 +12,7 @@ import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -113,6 +114,7 @@ public class CatalogFacade {
      * @return 상품 정보와 좋아요 수
      * @throws CoreException 상품을 찾을 수 없는 경우
      */
+    @Transactional(readOnly = true)
     public ProductInfo getProduct(Long productId) {
         // 캐시에서 조회 시도
         ProductInfo cachedResult = productCacheService.getCachedProduct(productId);
