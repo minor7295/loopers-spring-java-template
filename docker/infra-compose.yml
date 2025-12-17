@@ -13,21 +13,21 @@ services:
       - MYSQL_COLLATE=utf8mb4_general_ci
     volumes:
       - mysql-8-data:/var/lib/mysql
-    # 부하테스트를 위한 성능 저하 설정
-    deploy:
-      resources:
-        limits:
-          cpus: '0.05'  # CPU 사용량을 5%로 제한
-          memory: 256M  # 메모리를 256MB로 제한
-        reservations:
-          cpus: '0.05'  # 최소 CPU 보장
-          memory: 192M  # 최소 메모리 보장
-    # MySQL 버퍼 풀 크기 제한 (인덱스 없을 때 풀 테이블 스캔으로 인한 디스크 I/O 증가 효과)
-    command: 
-      - --innodb-buffer-pool-size=96M  # 버퍼 풀을 96MB로 제한 (전체 메모리 고려)
-      - --innodb-log-file-size=16M  # 로그 파일 크기 제한 (메모리 절약)
-      - --table-open-cache=200  # 테이블 캐시 크기 제한
-      - --thread-cache-size=8  # 스레드 캐시 크기 제한
+#    # 부하테스트를 위한 성능 저하 설정
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.05'  # CPU 사용량을 5%로 제한
+#          memory: 256M  # 메모리를 256MB로 제한
+#        reservations:
+#          cpus: '0.05'  # 최소 CPU 보장
+#          memory: 192M  # 최소 메모리 보장
+#    # MySQL 버퍼 풀 크기 제한 (인덱스 없을 때 풀 테이블 스캔으로 인한 디스크 I/O 증가 효과)
+#    command:
+#      - --innodb-buffer-pool-size=96M  # 버퍼 풀을 96MB로 제한 (전체 메모리 고려)
+#      - --innodb-log-file-size=16M  # 로그 파일 크기 제한 (메모리 절약)
+#      - --table-open-cache=200  # 테이블 캐시 크기 제한
+#      - --thread-cache-size=8  # 스레드 캐시 크기 제한
 
   redis-master:
     image: redis:7.0
