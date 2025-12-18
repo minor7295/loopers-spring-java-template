@@ -22,7 +22,6 @@ import org.springframework.kafka.support.Acknowledgment;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -60,8 +59,8 @@ class ProductMetricsConsumerTest {
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
         
-        ConsumerRecord<String, Object> record = new ConsumerRecord<String, Object>(
-            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty()
+        ConsumerRecord<String, Object> record = new ConsumerRecord<>(
+            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
         );
         List<ConsumerRecord<String, Object>> records = List.of(record);
 
@@ -89,8 +88,8 @@ class ProductMetricsConsumerTest {
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
         
-        ConsumerRecord<String, Object> record = new ConsumerRecord<String, Object>(
-            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty()
+        ConsumerRecord<String, Object> record = new ConsumerRecord<>(
+            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
         );
         List<ConsumerRecord<String, Object>> records = List.of(record);
 
@@ -128,8 +127,8 @@ class ProductMetricsConsumerTest {
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
         
-        ConsumerRecord<String, Object> record = new ConsumerRecord<String, Object>(
-            "order-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty()
+        ConsumerRecord<String, Object> record = new ConsumerRecord<>(
+            "order-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
         );
         List<ConsumerRecord<String, Object>> records = List.of(record);
 
@@ -164,8 +163,8 @@ class ProductMetricsConsumerTest {
         headers2.add(new RecordHeader("eventId", eventId2.getBytes(StandardCharsets.UTF_8)));
         
         List<ConsumerRecord<String, Object>> records = List.of(
-            new ConsumerRecord<String, Object>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event1, headers1, Optional.empty()),
-            new ConsumerRecord<String, Object>("like-events", 0, 1L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event2, headers2, Optional.empty())
+            new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event1, headers1),
+            new ConsumerRecord<>("like-events", 0, 1L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event2, headers2)
         );
 
         when(eventHandledService.isAlreadyHandled(eventId1)).thenReturn(false);
@@ -207,8 +206,8 @@ class ProductMetricsConsumerTest {
             .when(productMetricsService).incrementLikeCount(any());
         
         List<ConsumerRecord<String, Object>> records = List.of(
-            new ConsumerRecord<String, Object>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", invalidEvent, headers1, Optional.empty()),
-            new ConsumerRecord<String, Object>("like-events", 0, 1L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", validEvent, headers2, Optional.empty())
+            new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", invalidEvent, headers1),
+            new ConsumerRecord<>("like-events", 0, 1L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", validEvent, headers2)
         );
 
         // act
@@ -240,7 +239,7 @@ class ProductMetricsConsumerTest {
             .when(productMetricsService).incrementLikeCount(productId);
         
         List<ConsumerRecord<String, Object>> records = List.of(
-            new ConsumerRecord<String, Object>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty())
+            new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers)
         );
 
         // act
@@ -267,8 +266,8 @@ class ProductMetricsConsumerTest {
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
         
-        ConsumerRecord<String, Object> record = new ConsumerRecord<String, Object>(
-            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty()
+        ConsumerRecord<String, Object> record = new ConsumerRecord<>(
+            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
         );
         List<ConsumerRecord<String, Object>> records = List.of(record);
 
@@ -318,8 +317,8 @@ class ProductMetricsConsumerTest {
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
         
-        ConsumerRecord<String, Object> record = new ConsumerRecord<String, Object>(
-            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers, Optional.empty()
+        ConsumerRecord<String, Object> record = new ConsumerRecord<>(
+            "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
         );
         List<ConsumerRecord<String, Object>> records = List.of(record);
 

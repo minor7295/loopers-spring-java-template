@@ -11,7 +11,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.kafka.support.SendResult;
+import org.springframework.messaging.Message;
 
 import java.util.List;
 import java.util.Map;
@@ -50,7 +52,7 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
         when(objectMapper.readValue(anyString(), eq(Object.class)))
             .thenReturn(Map.of("orderId", 1));
-        when(kafkaTemplate.send(anyString(), anyString(), any()))
+        when(kafkaTemplate.send(anyString(), any(Message.class)))
             .thenReturn(createSuccessFuture());
         when(outboxEventRepository.save(any(OutboxEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -59,7 +61,7 @@ class OutboxEventPublisherTest {
         outboxEventPublisher.publishPendingEvents();
 
         // assert
-        verify(kafkaTemplate, times(2)).send(anyString(), anyString(), any());
+        verify(kafkaTemplate, times(2)).send(anyString(), any(Message.class));
         verify(outboxEventRepository, times(2)).save(any(OutboxEvent.class));
         
         ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
@@ -84,7 +86,7 @@ class OutboxEventPublisherTest {
         outboxEventPublisher.publishPendingEvents();
 
         // assert
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+        verify(kafkaTemplate, never()).send(anyString(), any(Message.class));
         verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
     }
 
@@ -99,9 +101,9 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
         when(objectMapper.readValue(anyString(), eq(Object.class)))
             .thenReturn(Map.of("orderId", 1));
-        when(kafkaTemplate.send(eq("order-events"), anyString(), any()))
+        when(kafkaTemplate.send(eq("order-events"), any(Message.class)))
             .thenThrow(new RuntimeException("Kafka 발행 실패"));
-        when(kafkaTemplate.send(eq("like-events"), anyString(), any()))
+        when(kafkaTemplate.send(eq("like-events"), any(Message.class)))
             .thenReturn(createSuccessFuture());
         when(outboxEventRepository.save(any(OutboxEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -110,7 +112,7 @@ class OutboxEventPublisherTest {
         outboxEventPublisher.publishPendingEvents();
 
         // assert
-        verify(kafkaTemplate, times(2)).send(anyString(), anyString(), any());
+        verify(kafkaTemplate, times(2)).send(anyString(), any(Message.class));
         verify(outboxEventRepository, times(2)).save(any(OutboxEvent.class));
         
         ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
@@ -138,7 +140,7 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
         when(objectMapper.readValue(anyString(), eq(Object.class)))
             .thenReturn(Map.of("orderId", 1));
-        when(kafkaTemplate.send(anyString(), anyString(), any()))
+        when(kafkaTemplate.send(anyString(), any(Message.class)))
             .thenReturn(createSuccessFuture());
         when(outboxEventRepository.save(any(OutboxEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -165,7 +167,7 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
         when(objectMapper.readValue(anyString(), eq(Object.class)))
             .thenReturn(Map.of("orderId", 1));
-        when(kafkaTemplate.send(anyString(), anyString(), any()))
+        when(kafkaTemplate.send(anyString(), any(Message.class)))
             .thenThrow(new RuntimeException("Kafka 발행 실패"));
         when(outboxEventRepository.save(any(OutboxEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -204,7 +206,7 @@ class OutboxEventPublisherTest {
         
         OutboxEvent savedEvent = captor.getValue();
         assertThat(savedEvent.getStatus()).isEqualTo(OutboxEvent.OutboxStatus.FAILED);
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+        verify(kafkaTemplate, never()).send(anyString(), any(Message.class));
     }
 
     @DisplayName("배치 크기만큼 이벤트를 조회한다.")
@@ -232,7 +234,7 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
         when(objectMapper.readValue(anyString(), eq(Object.class)))
             .thenReturn(Map.of("productId", 123));
-        when(kafkaTemplate.send(anyString(), anyString(), any()))
+        when(kafkaTemplate.send(anyString(), any(Message.class)))
             .thenReturn(createSuccessFuture());
         when(outboxEventRepository.save(any(OutboxEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
@@ -242,31 +244,33 @@ class OutboxEventPublisherTest {
 
         // assert - 각 토픽에 올바른 파티션 키가 전달되는지 검증
         ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> partitionKeyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
         
         verify(kafkaTemplate, times(3)).send(
             topicCaptor.capture(), 
-            partitionKeyCaptor.capture(), 
-            any()
+            messageCaptor.capture()
         );
         
         List<String> topics = topicCaptor.getAllValues();
-        List<String> partitionKeys = partitionKeyCaptor.getAllValues();
+        List<Message> messages = messageCaptor.getAllValues();
         
         // like-events는 productId를 파티션 키로 사용
         int likeIndex = topics.indexOf("like-events");
         assertThat(likeIndex).isNotEqualTo(-1);
-        assertThat(partitionKeys.get(likeIndex)).isEqualTo("product-123");
+        assertThat(messages.get(likeIndex).getHeaders().get(KafkaHeaders.KEY))
+            .isEqualTo("product-123");
         
         // order-events는 orderId를 파티션 키로 사용
         int orderIndex = topics.indexOf("order-events");
         assertThat(orderIndex).isNotEqualTo(-1);
-        assertThat(partitionKeys.get(orderIndex)).isEqualTo("order-456");
+        assertThat(messages.get(orderIndex).getHeaders().get(KafkaHeaders.KEY))
+            .isEqualTo("order-456");
         
         // product-events는 productId를 파티션 키로 사용
         int productIndex = topics.indexOf("product-events");
         assertThat(productIndex).isNotEqualTo(-1);
-        assertThat(partitionKeys.get(productIndex)).isEqualTo("product-789");
+        assertThat(messages.get(productIndex).getHeaders().get(KafkaHeaders.KEY))
+            .isEqualTo("product-789");
     }
 
     /**
