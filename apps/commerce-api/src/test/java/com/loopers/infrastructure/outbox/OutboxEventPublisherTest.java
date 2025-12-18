@@ -13,7 +13,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -219,6 +218,55 @@ class OutboxEventPublisherTest {
 
         // assert
         verify(outboxEventRepository).findPendingEvents(100);
+    }
+
+    @DisplayName("각 토픽에 적절한 파티션 키를 사용하여 Kafka로 발행한다.")
+    @Test
+    void usesCorrectPartitionKeyForEachTopic() throws Exception {
+        // arrange
+        OutboxEvent likeEvent = createPendingEvent("event-1", "like-events", "product-123");
+        OutboxEvent orderEvent = createPendingEvent("event-2", "order-events", "order-456");
+        OutboxEvent productEvent = createPendingEvent("event-3", "product-events", "product-789");
+        List<OutboxEvent> pendingEvents = List.of(likeEvent, orderEvent, productEvent);
+
+        when(outboxEventRepository.findPendingEvents(100)).thenReturn(pendingEvents);
+        when(objectMapper.readValue(anyString(), eq(Object.class)))
+            .thenReturn(Map.of("productId", 123));
+        when(kafkaTemplate.send(anyString(), anyString(), any()))
+            .thenReturn(createSuccessFuture());
+        when(outboxEventRepository.save(any(OutboxEvent.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        // act
+        outboxEventPublisher.publishPendingEvents();
+
+        // assert - 각 토픽에 올바른 파티션 키가 전달되는지 검증
+        ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> partitionKeyCaptor = ArgumentCaptor.forClass(String.class);
+        
+        verify(kafkaTemplate, times(3)).send(
+            topicCaptor.capture(), 
+            partitionKeyCaptor.capture(), 
+            any()
+        );
+        
+        List<String> topics = topicCaptor.getAllValues();
+        List<String> partitionKeys = partitionKeyCaptor.getAllValues();
+        
+        // like-events는 productId를 파티션 키로 사용
+        int likeIndex = topics.indexOf("like-events");
+        assertThat(likeIndex).isNotEqualTo(-1);
+        assertThat(partitionKeys.get(likeIndex)).isEqualTo("product-123");
+        
+        // order-events는 orderId를 파티션 키로 사용
+        int orderIndex = topics.indexOf("order-events");
+        assertThat(orderIndex).isNotEqualTo(-1);
+        assertThat(partitionKeys.get(orderIndex)).isEqualTo("order-456");
+        
+        // product-events는 productId를 파티션 키로 사용
+        int productIndex = topics.indexOf("product-events");
+        assertThat(productIndex).isNotEqualTo(-1);
+        assertThat(partitionKeys.get(productIndex)).isEqualTo("product-789");
     }
 
     /**
