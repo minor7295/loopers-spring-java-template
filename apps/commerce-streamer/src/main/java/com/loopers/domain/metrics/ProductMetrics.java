@@ -105,4 +105,23 @@ public class ProductMetrics {
         this.version++;
         this.updatedAt = LocalDateTime.now();
     }
+
+    /**
+     * 이벤트의 버전을 기준으로 메트릭을 업데이트해야 하는지 확인합니다.
+     * <p>
+     * 이벤트의 `version`이 메트릭의 `version`보다 크면 업데이트합니다.
+     * 이를 통해 오래된 이벤트가 최신 메트릭을 덮어쓰는 것을 방지합니다.
+     * </p>
+     *
+     * @param eventVersion 이벤트의 버전
+     * @return 업데이트해야 하면 true, 그렇지 않으면 false
+     */
+    public boolean shouldUpdate(Long eventVersion) {
+        if (eventVersion == null) {
+            // 이벤트에 버전 정보가 없으면 업데이트 (하위 호환성)
+            return true;
+        }
+        // 이벤트 버전이 메트릭 버전보다 크면 업데이트
+        return eventVersion > this.version;
+    }
 }

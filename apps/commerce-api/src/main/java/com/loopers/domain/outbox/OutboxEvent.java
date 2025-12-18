@@ -53,6 +53,9 @@ public class OutboxEvent {
     @Column(name = "partition_key", length = 255)
     private String partitionKey;
 
+    @Column(name = "version")
+    private Long version;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     private OutboxStatus status;
@@ -71,7 +74,8 @@ public class OutboxEvent {
         String aggregateType,
         String payload,
         String topic,
-        String partitionKey
+        String partitionKey,
+        Long version
     ) {
         this.eventId = eventId;
         this.eventType = eventType;
@@ -80,6 +84,7 @@ public class OutboxEvent {
         this.payload = payload;
         this.topic = topic;
         this.partitionKey = partitionKey;
+        this.version = version;
         this.status = OutboxStatus.PENDING;
         this.createdAt = LocalDateTime.now();
     }

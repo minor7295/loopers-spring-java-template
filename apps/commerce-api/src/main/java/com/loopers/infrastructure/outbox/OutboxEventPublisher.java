@@ -90,12 +90,18 @@ public class OutboxEventPublisher {
             // KafkaTemplate의 JsonSerializer가 자동으로 직렬화합니다
             Object payload = objectMapper.readValue(event.getPayload(), Object.class);
             
-            // Kafka 메시지 헤더에 eventId 추가 (멱등성 처리용)
-            var message = MessageBuilder
+            // Kafka 메시지 헤더에 eventId와 version 추가 (멱등성 및 버전 비교 처리용)
+            var messageBuilder = MessageBuilder
                 .withPayload(payload)
                 .setHeader(KafkaHeaders.KEY, event.getPartitionKey())
-                .setHeader("eventId", event.getEventId())
-                .build();
+                .setHeader("eventId", event.getEventId());
+            
+            // version이 있으면 헤더에 추가
+            if (event.getVersion() != null) {
+                messageBuilder.setHeader("version", event.getVersion());
+            }
+            
+            var message = messageBuilder.build();
             
             // Kafka로 발행 (비동기)
             kafkaTemplate.send(event.getTopic(), message);

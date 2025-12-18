@@ -32,6 +32,7 @@ public class OutboxEventService {
      * Kafka로 전송할 이벤트를 Outbox에 저장합니다.
      * <p>
      * 도메인 트랜잭션과 같은 트랜잭션에서 실행되어야 합니다.
+     * 집계 ID별로 순차적인 버전을 자동으로 부여합니다.
      * </p>
      *
      * @param eventType 이벤트 타입 (예: "OrderCreated", "LikeAdded")
@@ -54,6 +55,10 @@ public class OutboxEventService {
             String eventId = UUID.randomUUID().toString();
             String payload = objectMapper.writeValueAsString(event);
 
+            // 집계 ID별 최신 버전 조회 후 +1
+            Long latestVersion = outboxEventRepository.findLatestVersionByAggregateId(aggregateId, aggregateType);
+            Long nextVersion = latestVersion + 1L;
+
             OutboxEvent outboxEvent = OutboxEvent.builder()
                 .eventId(eventId)
                 .eventType(eventType)
@@ -62,11 +67,12 @@ public class OutboxEventService {
                 .payload(payload)
                 .topic(topic)
                 .partitionKey(partitionKey)
+                .version(nextVersion)
                 .build();
 
             outboxEventRepository.save(outboxEvent);
-            log.debug("Outbox 이벤트 저장: eventType={}, aggregateId={}, topic={}", 
-                eventType, aggregateId, topic);
+            log.debug("Outbox 이벤트 저장: eventType={}, aggregateId={}, topic={}, version={}", 
+                eventType, aggregateId, topic, nextVersion);
         } catch (Exception e) {
             log.error("Outbox 이벤트 저장 실패: eventType={}, aggregateId={}", 
                 eventType, aggregateId, e);

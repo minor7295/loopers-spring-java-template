@@ -31,4 +31,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepository {
         return outboxEventJpaRepository.findById(id)
             .orElseThrow(() -> new IllegalArgumentException("OutboxEvent not found: " + id));
     }
+
+    @Override
+    public Long findLatestVersionByAggregateId(String aggregateId, String aggregateType) {
+        return outboxEventJpaRepository.findLatestVersionByAggregateId(aggregateId, aggregateType);
+    }
 }

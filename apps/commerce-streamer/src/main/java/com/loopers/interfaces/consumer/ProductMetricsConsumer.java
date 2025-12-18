@@ -53,6 +53,7 @@ public class ProductMetricsConsumer {
     private final ObjectMapper objectMapper;
 
     private static final String EVENT_ID_HEADER = "eventId";
+    private static final String VERSION_HEADER = "version";
 
     /**
      * like-events 토픽을 구독하여 좋아요 수를 집계합니다.
@@ -95,19 +96,31 @@ public class ProductMetricsConsumer {
                     Object value = record.value();
                     String eventType;
                     
+                    // 버전 추출 (헤더에서)
+                    Long eventVersion = extractVersion(record);
+                    
                     // Spring Kafka가 자동으로 역직렬화한 경우
                     if (value instanceof LikeEvent.LikeAdded) {
                         LikeEvent.LikeAdded event = (LikeEvent.LikeAdded) value;
-                        productMetricsService.incrementLikeCount(event.productId());
+                        productMetricsService.incrementLikeCount(
+                            event.productId(), 
+                            eventVersion
+                        );
                         eventType = "LikeAdded";
                     } else if (value instanceof LikeEvent.LikeRemoved) {
                         LikeEvent.LikeRemoved event = (LikeEvent.LikeRemoved) value;
-                        productMetricsService.decrementLikeCount(event.productId());
+                        productMetricsService.decrementLikeCount(
+                            event.productId(), 
+                            eventVersion
+                        );
                         eventType = "LikeRemoved";
                     } else {
                         // JSON 문자열인 경우 수동 파싱
                         LikeEvent.LikeAdded event = parseLikeEvent(value);
-                        productMetricsService.incrementLikeCount(event.productId());
+                        productMetricsService.incrementLikeCount(
+                            event.productId(), 
+                            eventVersion
+                        );
                         eventType = "LikeAdded";
                     }
 
@@ -175,11 +188,15 @@ public class ProductMetricsConsumer {
                     Object value = record.value();
                     OrderEvent.OrderCreated event = parseOrderCreatedEvent(value);
                     
+                    // 버전 추출 (헤더에서)
+                    Long eventVersion = extractVersion(record);
+                    
                     // 주문 아이템별로 판매량 집계
                     for (OrderEvent.OrderCreated.OrderItemInfo item : event.orderItems()) {
                         productMetricsService.incrementSalesCount(
                             item.productId(),
-                            item.quantity()
+                            item.quantity(),
+                            eventVersion
                         );
                     }
 
@@ -263,7 +280,13 @@ public class ProductMetricsConsumer {
                     Object value = record.value();
                     ProductEvent.ProductViewed event = parseProductViewedEvent(value);
                     
-                    productMetricsService.incrementViewCount(event.productId());
+                    // 버전 추출 (헤더에서)
+                    Long eventVersion = extractVersion(record);
+                    
+                    productMetricsService.incrementViewCount(
+                        event.productId(), 
+                        eventVersion
+                    );
 
                     // 이벤트 처리 기록 저장
                     eventHandledService.markAsHandled(eventId, "ProductViewed", "product-events");
@@ -338,6 +361,27 @@ public class ProductMetricsConsumer {
         Header header = record.headers().lastHeader(EVENT_ID_HEADER);
         if (header != null && header.value() != null) {
             return new String(header.value(), StandardCharsets.UTF_8);
+        }
+        return null;
+    }
+
+    /**
+     * Kafka 메시지 헤더에서 version을 추출합니다.
+     *
+     * @param record Kafka 메시지 레코드
+     * @return version (없으면 null)
+     */
+    private Long extractVersion(ConsumerRecord<String, Object> record) {
+        Header header = record.headers().lastHeader(VERSION_HEADER);
+        if (header != null && header.value() != null) {
+            try {
+                String versionStr = new String(header.value(), StandardCharsets.UTF_8);
+                return Long.parseLong(versionStr);
+            } catch (NumberFormatException e) {
+                log.warn("버전 헤더 파싱 실패: offset={}, partition={}", 
+                    record.offset(), record.partition());
+                return null;
+            }
         }
         return null;
     }

@@ -23,4 +23,18 @@ public interface OutboxEventJpaRepository extends JpaRepository<OutboxEvent, Lon
            "ORDER BY e.created_at ASC " +
            "LIMIT :limit", nativeQuery = true)
     List<OutboxEvent> findPendingEvents(@Param("limit") int limit);
+
+    /**
+     * 집계 ID와 집계 타입으로 최신 버전을 조회합니다.
+     *
+     * @param aggregateId 집계 ID (예: productId, orderId)
+     * @param aggregateType 집계 타입 (예: "Product", "Order")
+     * @return 최신 버전 (없으면 0L)
+     */
+    @Query("SELECT COALESCE(MAX(e.version), 0L) FROM OutboxEvent e " +
+           "WHERE e.aggregateId = :aggregateId AND e.aggregateType = :aggregateType")
+    Long findLatestVersionByAggregateId(
+        @Param("aggregateId") String aggregateId,
+        @Param("aggregateType") String aggregateType
+    );
 }

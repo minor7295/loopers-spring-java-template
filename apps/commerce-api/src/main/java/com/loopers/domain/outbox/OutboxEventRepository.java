@@ -36,4 +36,16 @@ public interface OutboxEventRepository {
      * @return 조회된 Outbox 이벤트
      */
     OutboxEvent findById(Long id);
+
+    /**
+     * 집계 ID와 집계 타입으로 최신 버전을 조회합니다.
+     * <p>
+     * 같은 집계에 대한 이벤트의 최신 버전을 조회하여 순차적인 버전 관리를 위해 사용됩니다.
+     * </p>
+     *
+     * @param aggregateId 집계 ID (예: productId, orderId)
+     * @param aggregateType 집계 타입 (예: "Product", "Order")
+     * @return 최신 버전 (없으면 0L)
+     */
+    Long findLatestVersionByAggregateId(String aggregateId, String aggregateType);
 }
