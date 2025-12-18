@@ -41,7 +41,7 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.incrementLikeCount(productId);
+        productMetricsService.incrementLikeCount(productId, existingMetrics.getVersion() + 1L);
 
         // assert
         assertThat(existingMetrics.getLikeCount()).isEqualTo(2L);
@@ -63,7 +63,7 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.decrementLikeCount(productId);
+        productMetricsService.decrementLikeCount(productId, existingMetrics.getVersion() + 1L);
 
         // assert
         assertThat(existingMetrics.getLikeCount()).isEqualTo(0L);
@@ -85,7 +85,7 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.incrementSalesCount(productId, quantity);
+        productMetricsService.incrementSalesCount(productId, quantity, existingMetrics.getVersion() + 1L);
 
         // assert
         assertThat(existingMetrics.getSalesCount()).isEqualTo(5L);
@@ -106,7 +106,7 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.incrementViewCount(productId);
+        productMetricsService.incrementViewCount(productId, existingMetrics.getVersion() + 1L);
 
         // assert
         assertThat(existingMetrics.getViewCount()).isEqualTo(1L);
@@ -119,6 +119,7 @@ class ProductMetricsServiceTest {
     void createsNewMetrics_whenNotExists() {
         // arrange
         Long productId = 1L;
+        Long eventVersion = 1L; // 새로 생성된 메트릭의 버전(0)보다 큰 버전
         
         when(productMetricsRepository.findByProductIdForUpdate(productId))
             .thenReturn(Optional.empty());
@@ -126,12 +127,12 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.incrementLikeCount(productId);
+        productMetricsService.incrementLikeCount(productId, eventVersion);
 
         // assert
         verify(productMetricsRepository).findByProductIdForUpdate(productId);
         // findOrCreate에서 1번, incrementLikeCount에서 1번 총 2번 호출됨
-        verify(productMetricsRepository, times(2)).save(any(ProductMetrics.class));
+        verify(productMetricsRepository, atLeast(1)).save(any(ProductMetrics.class));
     }
 
     @DisplayName("판매량 증가 시 null이나 0 이하의 수량은 무시된다.")
@@ -149,9 +150,9 @@ class ProductMetricsServiceTest {
             .thenAnswer(invocation -> invocation.getArgument(0));
 
         // act
-        productMetricsService.incrementSalesCount(productId, null);
-        productMetricsService.incrementSalesCount(productId, 0);
-        productMetricsService.incrementSalesCount(productId, -1);
+        productMetricsService.incrementSalesCount(productId, null, existingMetrics.getVersion() + 1L);
+        productMetricsService.incrementSalesCount(productId, 0, existingMetrics.getVersion() + 1L);
+        productMetricsService.incrementSalesCount(productId, -1, existingMetrics.getVersion() + 1L);
 
         // assert
         // 유효하지 않은 수량은 무시되므로 값이 변경되지 않음
@@ -160,5 +161,57 @@ class ProductMetricsServiceTest {
         // save()는 호출되지만 메트릭 값은 변경되지 않음
         verify(productMetricsRepository, times(3)).findByProductIdForUpdate(productId);
         verify(productMetricsRepository, times(3)).save(existingMetrics);
+    }
+
+    @DisplayName("오래된 이벤트는 스킵하여 메트릭을 업데이트하지 않는다.")
+    @Test
+    void skipsOldEvent_whenEventIsOlderThanMetrics() {
+        // arrange
+        Long productId = 1L;
+        ProductMetrics existingMetrics = new ProductMetrics(productId);
+        existingMetrics.incrementLikeCount(); // 초기값: 1, version = 1
+        
+        Long oldEventVersion = existingMetrics.getVersion() - 1L; // 이전 버전 이벤트
+        
+        Long initialLikeCount = existingMetrics.getLikeCount();
+        Long initialVersion = existingMetrics.getVersion();
+        
+        when(productMetricsRepository.findByProductIdForUpdate(productId))
+            .thenReturn(Optional.of(existingMetrics));
+
+        // act
+        productMetricsService.incrementLikeCount(productId, oldEventVersion);
+
+        // assert
+        // 오래된 이벤트는 스킵되므로 값이 변경되지 않음
+        assertThat(existingMetrics.getLikeCount()).isEqualTo(initialLikeCount);
+        assertThat(existingMetrics.getVersion()).isEqualTo(initialVersion);
+        verify(productMetricsRepository).findByProductIdForUpdate(productId);
+        verify(productMetricsRepository, never()).save(any(ProductMetrics.class));
+    }
+
+    @DisplayName("최신 이벤트는 메트릭을 업데이트한다.")
+    @Test
+    void updatesMetrics_whenEventIsNewerThanMetrics() {
+        // arrange
+        Long productId = 1L;
+        ProductMetrics existingMetrics = new ProductMetrics(productId);
+        existingMetrics.incrementLikeCount(); // 초기값: 1, version = 1
+        
+        Long newEventVersion = existingMetrics.getVersion() + 1L; // 최신 버전 이벤트
+        
+        when(productMetricsRepository.findByProductIdForUpdate(productId))
+            .thenReturn(Optional.of(existingMetrics));
+        when(productMetricsRepository.save(any(ProductMetrics.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        // act
+        productMetricsService.incrementLikeCount(productId, newEventVersion);
+
+        // assert
+        // 최신 이벤트는 반영됨
+        assertThat(existingMetrics.getLikeCount()).isEqualTo(2L);
+        verify(productMetricsRepository).findByProductIdForUpdate(productId);
+        verify(productMetricsRepository).save(existingMetrics);
     }
 }

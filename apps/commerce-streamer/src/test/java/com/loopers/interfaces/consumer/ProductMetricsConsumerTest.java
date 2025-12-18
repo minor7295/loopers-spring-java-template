@@ -23,7 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -58,6 +58,7 @@ class ProductMetricsConsumerTest {
         
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
+        headers.add(new RecordHeader("version", "1".getBytes(StandardCharsets.UTF_8)));
         
         ConsumerRecord<String, Object> record = new ConsumerRecord<>(
             "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
@@ -71,7 +72,7 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService).incrementLikeCount(productId);
+        verify(productMetricsService).incrementLikeCount(eq(productId), eq(1L));
         verify(eventHandledService).markAsHandled(eventId, "LikeAdded", "like-events");
         verify(acknowledgment).acknowledge();
     }
@@ -87,6 +88,7 @@ class ProductMetricsConsumerTest {
         
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
+        headers.add(new RecordHeader("version", "2".getBytes(StandardCharsets.UTF_8)));
         
         ConsumerRecord<String, Object> record = new ConsumerRecord<>(
             "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
@@ -100,7 +102,7 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService).decrementLikeCount(productId);
+        verify(productMetricsService).decrementLikeCount(eq(productId), eq(2L));
         verify(eventHandledService).markAsHandled(eventId, "LikeRemoved", "like-events");
         verify(acknowledgment).acknowledge();
     }
@@ -126,6 +128,7 @@ class ProductMetricsConsumerTest {
         
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
+        headers.add(new RecordHeader("version", "3".getBytes(StandardCharsets.UTF_8)));
         
         ConsumerRecord<String, Object> record = new ConsumerRecord<>(
             "order-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
@@ -139,8 +142,8 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService).incrementSalesCount(productId1, 3);
-        verify(productMetricsService).incrementSalesCount(productId2, 2);
+        verify(productMetricsService).incrementSalesCount(eq(productId1), eq(3), eq(3L));
+        verify(productMetricsService).incrementSalesCount(eq(productId2), eq(2), eq(3L));
         verify(eventHandledService).markAsHandled(eventId, "OrderCreated", "order-events");
         verify(acknowledgment).acknowledge();
     }
@@ -159,8 +162,10 @@ class ProductMetricsConsumerTest {
         
         Headers headers1 = new RecordHeaders();
         headers1.add(new RecordHeader("eventId", eventId1.getBytes(StandardCharsets.UTF_8)));
+        headers1.add(new RecordHeader("version", "4".getBytes(StandardCharsets.UTF_8)));
         Headers headers2 = new RecordHeaders();
         headers2.add(new RecordHeader("eventId", eventId2.getBytes(StandardCharsets.UTF_8)));
+        headers2.add(new RecordHeader("version", "5".getBytes(StandardCharsets.UTF_8)));
         
         List<ConsumerRecord<String, Object>> records = List.of(
             new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event1, headers1),
@@ -176,8 +181,8 @@ class ProductMetricsConsumerTest {
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId1);
         verify(eventHandledService).isAlreadyHandled(eventId2);
-        verify(productMetricsService).incrementLikeCount(productId);
-        verify(productMetricsService).decrementLikeCount(productId);
+        verify(productMetricsService).incrementLikeCount(eq(productId), eq(4L));
+        verify(productMetricsService).decrementLikeCount(eq(productId), eq(5L));
         verify(eventHandledService).markAsHandled(eventId1, "LikeAdded", "like-events");
         verify(eventHandledService).markAsHandled(eventId2, "LikeRemoved", "like-events");
         verify(acknowledgment, times(1)).acknowledge();
@@ -197,13 +202,15 @@ class ProductMetricsConsumerTest {
         
         Headers headers1 = new RecordHeaders();
         headers1.add(new RecordHeader("eventId", eventId1.getBytes(StandardCharsets.UTF_8)));
+        headers1.add(new RecordHeader("version", "6".getBytes(StandardCharsets.UTF_8)));
         Headers headers2 = new RecordHeaders();
         headers2.add(new RecordHeader("eventId", eventId2.getBytes(StandardCharsets.UTF_8)));
+        headers2.add(new RecordHeader("version", "7".getBytes(StandardCharsets.UTF_8)));
         
         when(eventHandledService.isAlreadyHandled(eventId1)).thenReturn(false);
         when(eventHandledService.isAlreadyHandled(eventId2)).thenReturn(false);
         doThrow(new RuntimeException("처리 실패"))
-            .when(productMetricsService).incrementLikeCount(any());
+            .when(productMetricsService).incrementLikeCount(any(), anyLong());
         
         List<ConsumerRecord<String, Object>> records = List.of(
             new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", invalidEvent, headers1),
@@ -216,7 +223,7 @@ class ProductMetricsConsumerTest {
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId1);
         verify(eventHandledService).isAlreadyHandled(eventId2);
-        verify(productMetricsService, atLeastOnce()).incrementLikeCount(any());
+        verify(productMetricsService, atLeastOnce()).incrementLikeCount(any(), anyLong());
         verify(acknowledgment).acknowledge();
     }
 
@@ -232,11 +239,12 @@ class ProductMetricsConsumerTest {
         
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
+        headers.add(new RecordHeader("version", "8".getBytes(StandardCharsets.UTF_8)));
         
         // 서비스 호출 시 예외 발생
         when(eventHandledService.isAlreadyHandled(eventId)).thenReturn(false);
         doThrow(new RuntimeException("서비스 처리 실패"))
-            .when(productMetricsService).incrementLikeCount(productId);
+            .when(productMetricsService).incrementLikeCount(eq(productId), anyLong());
         
         List<ConsumerRecord<String, Object>> records = List.of(
             new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers)
@@ -248,7 +256,7 @@ class ProductMetricsConsumerTest {
         // assert
         // 개별 이벤트 실패는 내부 catch 블록에서 처리되고 계속 진행되므로 acknowledgment는 호출됨
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService).incrementLikeCount(productId);
+        verify(productMetricsService).incrementLikeCount(eq(productId), anyLong());
         // 예외 발생 시 markAsHandled는 호출되지 않음
         verify(eventHandledService, never()).markAsHandled(any(), any(), any());
         verify(acknowledgment).acknowledge();
@@ -278,7 +286,7 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService, never()).incrementLikeCount(any());
+        verify(productMetricsService, never()).incrementLikeCount(any(), anyLong());
         verify(eventHandledService, never()).markAsHandled(any(), any(), any());
         verify(acknowledgment).acknowledge();
     }
@@ -301,7 +309,7 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService, never()).isAlreadyHandled(any());
-        verify(productMetricsService, never()).incrementLikeCount(any());
+        verify(productMetricsService, never()).incrementLikeCount(any(), anyLong());
         verify(acknowledgment).acknowledge();
     }
 
@@ -316,6 +324,7 @@ class ProductMetricsConsumerTest {
         
         Headers headers = new RecordHeaders();
         headers.add(new RecordHeader("eventId", eventId.getBytes(StandardCharsets.UTF_8)));
+        headers.add(new RecordHeader("version", "9".getBytes(StandardCharsets.UTF_8)));
         
         ConsumerRecord<String, Object> record = new ConsumerRecord<>(
             "like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, "key", event, headers
@@ -331,7 +340,7 @@ class ProductMetricsConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(productMetricsService).incrementLikeCount(productId);
+        verify(productMetricsService).incrementLikeCount(eq(productId), anyLong());
         verify(eventHandledService).markAsHandled(eventId, "LikeAdded", "like-events");
         verify(acknowledgment).acknowledge();
     }
