@@ -6,6 +6,8 @@ import com.loopers.domain.outbox.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +78,9 @@ public class OutboxEventPublisher {
 
     /**
      * Outbox 이벤트를 Kafka로 발행합니다.
+     * <p>
+     * 멱등성 처리를 위해 `eventId`를 Kafka 메시지 헤더에 포함시킵니다.
+     * </p>
      *
      * @param event 발행할 Outbox 이벤트
      */
@@ -85,12 +90,15 @@ public class OutboxEventPublisher {
             // KafkaTemplate의 JsonSerializer가 자동으로 직렬화합니다
             Object payload = objectMapper.readValue(event.getPayload(), Object.class);
             
+            // Kafka 메시지 헤더에 eventId 추가 (멱등성 처리용)
+            var message = MessageBuilder
+                .withPayload(payload)
+                .setHeader(KafkaHeaders.KEY, event.getPartitionKey())
+                .setHeader("eventId", event.getEventId())
+                .build();
+            
             // Kafka로 발행 (비동기)
-            kafkaTemplate.send(
-                event.getTopic(),
-                event.getPartitionKey(),
-                payload
-            );
+            kafkaTemplate.send(event.getTopic(), message);
             
             log.debug("Outbox 이벤트 Kafka 발행 성공: eventId={}, topic={}, partitionKey={}", 
                 event.getEventId(), event.getTopic(), event.getPartitionKey());

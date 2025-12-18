@@ -1,6 +1,7 @@
 package com.loopers.interfaces.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loopers.application.eventhandled.EventHandledService;
 import com.loopers.application.metrics.ProductMetricsService;
 import com.loopers.confg.kafka.KafkaConfig;
 import com.loopers.domain.event.LikeEvent;
@@ -9,10 +10,12 @@ import com.loopers.domain.event.ProductEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -46,10 +49,21 @@ import java.util.List;
 public class ProductMetricsConsumer {
 
     private final ProductMetricsService productMetricsService;
+    private final EventHandledService eventHandledService;
     private final ObjectMapper objectMapper;
+
+    private static final String EVENT_ID_HEADER = "eventId";
 
     /**
      * like-events 토픽을 구독하여 좋아요 수를 집계합니다.
+     * <p>
+     * <b>멱등성 처리:</b>
+     * <ul>
+     *   <li>Kafka 메시지 헤더에서 `eventId`를 추출</li>
+     *   <li>이미 처리된 이벤트는 스킵하여 중복 처리 방지</li>
+     *   <li>처리 후 `event_handled` 테이블에 기록</li>
+     * </ul>
+     * </p>
      *
      * @param records Kafka 메시지 레코드 목록
      * @param acknowledgment 수동 커밋을 위한 Acknowledgment
@@ -65,20 +79,44 @@ public class ProductMetricsConsumer {
         try {
             for (ConsumerRecord<String, Object> record : records) {
                 try {
+                    String eventId = extractEventId(record);
+                    if (eventId == null) {
+                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
+                            record.offset(), record.partition());
+                        continue;
+                    }
+
+                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
+                    if (eventHandledService.isAlreadyHandled(eventId)) {
+                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
+                        continue;
+                    }
+
                     Object value = record.value();
+                    String eventType;
                     
                     // Spring Kafka가 자동으로 역직렬화한 경우
                     if (value instanceof LikeEvent.LikeAdded) {
                         LikeEvent.LikeAdded event = (LikeEvent.LikeAdded) value;
                         productMetricsService.incrementLikeCount(event.productId());
+                        eventType = "LikeAdded";
                     } else if (value instanceof LikeEvent.LikeRemoved) {
                         LikeEvent.LikeRemoved event = (LikeEvent.LikeRemoved) value;
                         productMetricsService.decrementLikeCount(event.productId());
+                        eventType = "LikeRemoved";
                     } else {
                         // JSON 문자열인 경우 수동 파싱
                         LikeEvent.LikeAdded event = parseLikeEvent(value);
                         productMetricsService.incrementLikeCount(event.productId());
+                        eventType = "LikeAdded";
                     }
+
+                    // 이벤트 처리 기록 저장
+                    eventHandledService.markAsHandled(eventId, eventType, "like-events");
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
+                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
+                        record.offset(), record.partition());
                 } catch (Exception e) {
                     log.error("좋아요 이벤트 처리 실패: offset={}, partition={}", 
                         record.offset(), record.partition(), e);
@@ -98,6 +136,14 @@ public class ProductMetricsConsumer {
 
     /**
      * order-events 토픽을 구독하여 판매량을 집계합니다.
+     * <p>
+     * <b>멱등성 처리:</b>
+     * <ul>
+     *   <li>Kafka 메시지 헤더에서 `eventId`를 추출</li>
+     *   <li>이미 처리된 이벤트는 스킵하여 중복 처리 방지</li>
+     *   <li>처리 후 `event_handled` 테이블에 기록</li>
+     * </ul>
+     * </p>
      *
      * @param records Kafka 메시지 레코드 목록
      * @param acknowledgment 수동 커밋을 위한 Acknowledgment
@@ -113,6 +159,19 @@ public class ProductMetricsConsumer {
         try {
             for (ConsumerRecord<String, Object> record : records) {
                 try {
+                    String eventId = extractEventId(record);
+                    if (eventId == null) {
+                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
+                            record.offset(), record.partition());
+                        continue;
+                    }
+
+                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
+                    if (eventHandledService.isAlreadyHandled(eventId)) {
+                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
+                        continue;
+                    }
+
                     Object value = record.value();
                     OrderEvent.OrderCreated event = parseOrderCreatedEvent(value);
                     
@@ -123,6 +182,13 @@ public class ProductMetricsConsumer {
                             item.quantity()
                         );
                     }
+
+                    // 이벤트 처리 기록 저장
+                    eventHandledService.markAsHandled(eventId, "OrderCreated", "order-events");
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
+                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
+                        record.offset(), record.partition());
                 } catch (Exception e) {
                     log.error("주문 이벤트 처리 실패: offset={}, partition={}", 
                         record.offset(), record.partition(), e);
@@ -158,6 +224,14 @@ public class ProductMetricsConsumer {
 
     /**
      * product-events 토픽을 구독하여 조회 수를 집계합니다.
+     * <p>
+     * <b>멱등성 처리:</b>
+     * <ul>
+     *   <li>Kafka 메시지 헤더에서 `eventId`를 추출</li>
+     *   <li>이미 처리된 이벤트는 스킵하여 중복 처리 방지</li>
+     *   <li>처리 후 `event_handled` 테이블에 기록</li>
+     * </ul>
+     * </p>
      *
      * @param records Kafka 메시지 레코드 목록
      * @param acknowledgment 수동 커밋을 위한 Acknowledgment
@@ -173,10 +247,30 @@ public class ProductMetricsConsumer {
         try {
             for (ConsumerRecord<String, Object> record : records) {
                 try {
+                    String eventId = extractEventId(record);
+                    if (eventId == null) {
+                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
+                            record.offset(), record.partition());
+                        continue;
+                    }
+
+                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
+                    if (eventHandledService.isAlreadyHandled(eventId)) {
+                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
+                        continue;
+                    }
+
                     Object value = record.value();
                     ProductEvent.ProductViewed event = parseProductViewedEvent(value);
                     
                     productMetricsService.incrementViewCount(event.productId());
+
+                    // 이벤트 처리 기록 저장
+                    eventHandledService.markAsHandled(eventId, "ProductViewed", "product-events");
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
+                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
+                        record.offset(), record.partition());
                 } catch (Exception e) {
                     log.error("상품 조회 이벤트 처리 실패: offset={}, partition={}", 
                         record.offset(), record.partition(), e);
@@ -232,5 +326,19 @@ public class ProductMetricsConsumer {
         } catch (Exception e) {
             throw new RuntimeException("ProductViewed 이벤트 파싱 실패", e);
         }
+    }
+
+    /**
+     * Kafka 메시지 헤더에서 eventId를 추출합니다.
+     *
+     * @param record Kafka 메시지 레코드
+     * @return eventId (없으면 null)
+     */
+    private String extractEventId(ConsumerRecord<String, Object> record) {
+        Header header = record.headers().lastHeader(EVENT_ID_HEADER);
+        if (header != null && header.value() != null) {
+            return new String(header.value(), StandardCharsets.UTF_8);
+        }
+        return null;
     }
 }
