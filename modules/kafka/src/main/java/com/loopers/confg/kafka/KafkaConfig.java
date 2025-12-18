@@ -1,6 +1,7 @@
 package com.loopers.confg.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -8,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.converter.BatchMessagingMessageConverter;
@@ -30,19 +32,19 @@ public class KafkaConfig {
     public static final int MAX_POLL_INTERVAL_MS = 2 * 60 * 1000; // max poll interval = 2m
 
     @Bean
-    public ProducerFactory<Object, Object> producerFactory(KafkaProperties kafkaProperties) {
+    public ProducerFactory<String, Object> producerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
         return new DefaultKafkaProducerFactory<>(props);
     }
 
     @Bean
-    public ConsumerFactory<Object, Object> consumerFactory(KafkaProperties kafkaProperties) {
+    public ConsumerFactory<String, Object> consumerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildConsumerProperties());
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
     @Bean
-    public KafkaTemplate<Object, Object> kafkaTemplate(ProducerFactory<Object, Object> producerFactory) {
+    public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> producerFactory) {
         return new KafkaTemplate<>(producerFactory);
     }
 
@@ -52,7 +54,7 @@ public class KafkaConfig {
     }
 
     @Bean(name = BATCH_LISTENER)
-    public ConcurrentKafkaListenerContainerFactory<Object, Object> defaultBatchListenerContainerFactory(
+    public ConcurrentKafkaListenerContainerFactory<String, Object> defaultBatchListenerContainerFactory(
             KafkaProperties kafkaProperties,
             ByteArrayJsonMessageConverter converter
     ) {
@@ -64,12 +66,102 @@ public class KafkaConfig {
         consumerConfig.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, HEARTBEAT_INTERVAL_MS);
         consumerConfig.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, MAX_POLL_INTERVAL_MS);
 
-        ConcurrentKafkaListenerContainerFactory<Object, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(new DefaultKafkaConsumerFactory<>(consumerConfig));
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL); // 수동 커밋
         factory.setBatchMessageConverter(new BatchMessagingMessageConverter(converter));
         factory.setConcurrency(3);
         factory.setBatchListener(true);
         return factory;
+    }
+
+    /**
+     * Like 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: productId (상품별 좋아요 수 집계를 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic likeEventsTopic() {
+        return TopicBuilder.name("like-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
+    }
+
+    /**
+     * Product 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: productId (상품별 재고 관리를 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic productEventsTopic() {
+        return TopicBuilder.name("product-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
+    }
+
+    /**
+     * Order 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: orderId (주문별 이벤트 순서 보장을 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic orderEventsTopic() {
+        return TopicBuilder.name("order-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
+    }
+
+    /**
+     * Payment 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: orderId (주문별 결제 처리 순서 보장을 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic paymentEventsTopic() {
+        return TopicBuilder.name("payment-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
+    }
+
+    /**
+     * Coupon 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: orderId (주문별 쿠폰 할인 적용 순서 보장을 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic couponEventsTopic() {
+        return TopicBuilder.name("coupon-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
+    }
+
+    /**
+     * User 도메인 이벤트 토픽.
+     * <p>
+     * 파티션 키: userId (사용자별 포인트 처리 순서 보장을 위해)
+     * </p>
+     */
+    @Bean
+    public NewTopic userEventsTopic() {
+        return TopicBuilder.name("user-events")
+                .partitions(3)
+                .replicas(1)
+                .config("min.insync.replicas", "1")
+                .build();
     }
 }
