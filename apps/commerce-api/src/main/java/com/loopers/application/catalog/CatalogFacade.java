@@ -6,10 +6,13 @@ import com.loopers.application.product.ProductService;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
+import com.loopers.domain.product.ProductEvent;
+import com.loopers.domain.product.ProductEventPublisher;
 import com.loopers.support.error.CoreException;
 import com.loopers.support.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,7 @@ public class CatalogFacade {
     private final BrandService brandService;
     private final ProductService productService;
     private final ProductCacheService productCacheService;
+    private final ProductEventPublisher productEventPublisher;
 
     /**
      * 상품 목록을 조회합니다.
@@ -103,16 +107,20 @@ public class CatalogFacade {
      * 상품 정보를 조회합니다.
      * <p>
      * Redis 캐시를 먼저 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
+     * 상품 조회 시 ProductViewed 이벤트를 발행하여 메트릭 집계에 사용합니다.
      * </p>
      *
      * @param productId 상품 ID
      * @return 상품 정보와 좋아요 수
      * @throws CoreException 상품을 찾을 수 없는 경우
      */
+    @Transactional(readOnly = true)
     public ProductInfo getProduct(Long productId) {
         // 캐시에서 조회 시도
         ProductInfo cachedResult = productCacheService.getCachedProduct(productId);
         if (cachedResult != null) {
+            // 캐시 히트 시에도 조회 수 집계를 위해 이벤트 발행
+            productEventPublisher.publish(ProductEvent.ProductViewed.from(productId));
             return cachedResult;
         }
         
@@ -132,6 +140,9 @@ public class CatalogFacade {
         
         // 캐시에 저장
         productCacheService.cacheProduct(productId, result);
+        
+        // ✅ 상품 조회 이벤트 발행 (메트릭 집계용)
+        productEventPublisher.publish(ProductEvent.ProductViewed.from(productId));
         
         // 로컬 캐시의 좋아요 수 델타 적용 (DB 조회 결과에도 델타 반영)
         return productCacheService.applyLikeCountDelta(result);
