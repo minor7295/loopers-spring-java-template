@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -118,6 +121,63 @@ public class RankingService {
         zSetTemplate.setTtlIfNotExists(key, TTL);
         
         log.debug("배치 점수 적재 완료: date={}, count={}", date, scoreMap.size());
+    }
+
+    /**
+     * 시간 단위 랭킹을 일간 랭킹으로 집계합니다.
+     * <p>
+     * 하루의 모든 시간 단위 랭킹을 ZUNIONSTORE로 합쳐서 일간 랭킹을 생성합니다.
+     * </p>
+     *
+     * @param date 날짜
+     * @return 집계된 멤버 수
+     */
+    public Long aggregateHourlyToDaily(LocalDate date) {
+        String dailyKey = keyGenerator.generateDailyKey(date);
+        List<String> hourlyKeys = new ArrayList<>();
+        
+        // 해당 날짜의 모든 시간 단위 키 생성 (00시 ~ 23시)
+        for (int hour = 0; hour < 24; hour++) {
+            LocalDateTime dateTime = date.atTime(hour, 0);
+            String hourlyKey = keyGenerator.generateHourlyKey(dateTime);
+            hourlyKeys.add(hourlyKey);
+        }
+        
+        // ZUNIONSTORE로 모든 시간 단위 랭킹을 일간 랭킹으로 집계
+        Long result = zSetTemplate.unionStore(dailyKey, hourlyKeys);
+        
+        // TTL 설정
+        zSetTemplate.setTtlIfNotExists(dailyKey, TTL);
+        
+        log.info("시간 단위 랭킹을 일간 랭킹으로 집계 완료: date={}, memberCount={}", date, result);
+        return result;
+    }
+
+    /**
+     * Score Carry-Over: 오늘의 랭킹을 내일 랭킹에 일부 반영합니다.
+     * <p>
+     * 콜드 스타트 문제를 완화하기 위해 오늘의 랭킹을 가중치를 적용하여 내일 랭킹에 반영합니다.
+     * 예: 오늘 랭킹의 10%를 내일 랭킹에 반영
+     * </p>
+     *
+     * @param today 오늘 날짜
+     * @param tomorrow 내일 날짜
+     * @param carryOverWeight Carry-Over 가중치 (예: 0.1 = 10%)
+     * @return 반영된 멤버 수
+     */
+    public Long carryOverScore(LocalDate today, LocalDate tomorrow, double carryOverWeight) {
+        String todayKey = keyGenerator.generateDailyKey(today);
+        String tomorrowKey = keyGenerator.generateDailyKey(tomorrow);
+        
+        // 오늘 랭킹을 가중치를 적용하여 내일 랭킹에 합산
+        Long result = zSetTemplate.unionStoreWithWeight(tomorrowKey, todayKey, carryOverWeight);
+        
+        // TTL 설정
+        zSetTemplate.setTtlIfNotExists(tomorrowKey, TTL);
+        
+        log.info("Score Carry-Over 완료: today={}, tomorrow={}, weight={}, memberCount={}", 
+            today, tomorrow, carryOverWeight, result);
+        return result;
     }
 
     /**
