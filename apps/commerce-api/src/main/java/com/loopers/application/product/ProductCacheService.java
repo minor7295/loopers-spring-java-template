@@ -269,7 +269,7 @@ public class ProductCacheService {
             updatedLikesCount
         );
 
-        return new ProductInfo(updatedDetail);
+        return ProductInfo.withoutRank(updatedDetail);
     }
 }
 
