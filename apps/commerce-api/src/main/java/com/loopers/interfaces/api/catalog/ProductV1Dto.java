@@ -21,6 +21,7 @@ public class ProductV1Dto {
      * @param stock 상품 재고
      * @param brandId 브랜드 ID
      * @param likesCount 좋아요 수
+     * @param rank 랭킹 순위 (1부터 시작, 랭킹에 없으면 null)
      */
     public record ProductResponse(
         Long productId,
@@ -28,7 +29,8 @@ public class ProductV1Dto {
         Integer price,
         Integer stock,
         Long brandId,
-        Long likesCount
+        Long likesCount,
+        Long rank
     ) {
         /**
          * ProductInfo로부터 ProductResponse를 생성합니다.
@@ -44,7 +46,8 @@ public class ProductV1Dto {
                 detail.getPrice(),
                 detail.getStock(),
                 detail.getBrandId(),
-                detail.getLikesCount()
+                detail.getLikesCount(),
+                productInfo.rank()
             );
         }
     }
