@@ -5,12 +5,11 @@ import com.loopers.application.product.ProductService;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
-import com.loopers.support.error.CoreException;
-import com.loopers.support.error.ErrorType;
 import com.loopers.zset.ZSetEntry;
 import com.loopers.zset.RedisZSetTemplate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +50,13 @@ public class RankingService {
      * <p>
      * ZSET에서 상위 N개를 조회하고, 상품 정보를 Aggregation하여 반환합니다.
      * </p>
+     * <p>
+     * <b>Graceful Degradation:</b>
+     * <ul>
+     *   <li>Redis 장애 시 전날 랭킹으로 Fallback</li>
+     *   <li>전날 랭킹도 없으면 기본 랭킹(좋아요순) 제공</li>
+     * </ul>
+     * </p>
      *
      * @param date 날짜 (yyyyMMdd 형식의 문자열 또는 LocalDate)
      * @param page 페이지 번호 (0부터 시작)
@@ -59,6 +65,37 @@ public class RankingService {
      */
     @Transactional(readOnly = true)
     public RankingsResponse getRankings(LocalDate date, int page, int size) {
+        try {
+            return getRankingsFromRedis(date, page, size);
+        } catch (DataAccessException e) {
+            log.warn("Redis 랭킹 조회 실패, 전날 랭킹으로 Fallback: date={}, error={}", 
+                date, e.getMessage());
+            // 전날 랭킹으로 Fallback 시도
+            try {
+                LocalDate yesterday = date.minusDays(1);
+                return getRankingsFromRedis(yesterday, page, size);
+            } catch (DataAccessException fallbackException) {
+                log.warn("전날 랭킹 조회도 실패, 기본 랭킹(좋아요순)으로 Fallback: date={}, error={}", 
+                    date, fallbackException.getMessage());
+                // 기본 랭킹(좋아요순) 제공
+                return getDefaultRankings(page, size);
+            }
+        } catch (Exception e) {
+            log.error("랭킹 조회 중 예상치 못한 오류 발생, 기본 랭킹으로 Fallback: date={}", date, e);
+            return getDefaultRankings(page, size);
+        }
+    }
+
+    /**
+     * Redis에서 랭킹을 조회합니다.
+     *
+     * @param date 날짜
+     * @param page 페이지 번호
+     * @param size 페이지당 항목 수
+     * @return 랭킹 조회 결과
+     * @throws DataAccessException Redis 접근 실패 시
+     */
+    private RankingsResponse getRankingsFromRedis(LocalDate date, int page, int size) {
         String key = keyGenerator.generateDailyKey(date);
         long start = (long) page * size;
         long end = start + size - 1;
@@ -133,9 +170,78 @@ public class RankingService {
     }
 
     /**
+     * 기본 랭킹(좋아요순)을 제공합니다.
+     * <p>
+     * Redis 장애 시 Fallback으로 사용됩니다.
+     * </p>
+     *
+     * @param page 페이지 번호 (0부터 시작)
+     * @param size 페이지당 항목 수
+     * @return 랭킹 조회 결과
+     */
+    private RankingsResponse getDefaultRankings(int page, int size) {
+        // 좋아요순으로 상품 조회
+        List<Product> products = productService.findAll(null, "likes_desc", page, size);
+        long totalCount = productService.countAll(null);
+
+        if (products.isEmpty()) {
+            return RankingsResponse.empty(page, size);
+        }
+
+        // 브랜드 ID 수집
+        List<Long> brandIds = products.stream()
+            .map(Product::getBrandId)
+            .distinct()
+            .toList();
+
+        // 브랜드 배치 조회
+        Map<Long, Brand> brandMap = brandService.getBrands(brandIds).stream()
+            .collect(Collectors.toMap(Brand::getId, brand -> brand));
+
+        // 랭킹 항목 생성 (좋아요 수를 점수로 사용)
+        List<RankingItem> rankingItems = new ArrayList<>();
+        long start = (long) page * size;
+        for (int i = 0; i < products.size(); i++) {
+            Product product = products.get(i);
+            Long rank = start + i + 1; // 1-based 순위
+
+            Brand brand = brandMap.get(product.getBrandId());
+            if (brand == null) {
+                log.warn("상품의 브랜드를 찾을 수 없습니다: productId={}, brandId={}", 
+                    product.getId(), product.getBrandId());
+                continue;
+            }
+
+            ProductDetail productDetail = ProductDetail.from(
+                product, 
+                brand.getName(), 
+                product.getLikeCount()
+            );
+
+            // 좋아요 수를 점수로 사용
+            double score = product.getLikeCount() != null ? product.getLikeCount().doubleValue() : 0.0;
+            rankingItems.add(new RankingItem(
+                rank,
+                score,
+                productDetail
+            ));
+        }
+
+        boolean hasNext = (start + size) < totalCount;
+        return new RankingsResponse(rankingItems, page, size, hasNext);
+    }
+
+    /**
      * 특정 상품의 순위를 조회합니다.
      * <p>
      * 상품이 랭킹에 없으면 null을 반환합니다.
+     * </p>
+     * <p>
+     * <b>Graceful Degradation:</b>
+     * <ul>
+     *   <li>Redis 장애 시 전날 랭킹으로 Fallback</li>
+     *   <li>전날 랭킹도 없으면 null 반환 (기본 랭킹에서는 순위 계산 불가)</li>
+     * </ul>
      * </p>
      *
      * @param productId 상품 ID
@@ -144,6 +250,36 @@ public class RankingService {
      */
     @Transactional(readOnly = true)
     public Long getProductRank(Long productId, LocalDate date) {
+        try {
+            return getProductRankFromRedis(productId, date);
+        } catch (DataAccessException e) {
+            log.warn("Redis 상품 순위 조회 실패, 전날 랭킹으로 Fallback: productId={}, date={}, error={}", 
+                productId, date, e.getMessage());
+            // 전날 랭킹으로 Fallback 시도
+            try {
+                LocalDate yesterday = date.minusDays(1);
+                return getProductRankFromRedis(productId, yesterday);
+            } catch (DataAccessException fallbackException) {
+                log.warn("전날 랭킹 조회도 실패: productId={}, date={}, error={}", 
+                    productId, date, fallbackException.getMessage());
+                // 기본 랭킹에서는 순위 계산이 어려우므로 null 반환
+                return null;
+            }
+        } catch (Exception e) {
+            log.error("상품 순위 조회 중 예상치 못한 오류 발생: productId={}, date={}", productId, date, e);
+            return null;
+        }
+    }
+
+    /**
+     * Redis에서 상품 순위를 조회합니다.
+     *
+     * @param productId 상품 ID
+     * @param date 날짜
+     * @return 순위 (1부터 시작, 없으면 null)
+     * @throws DataAccessException Redis 접근 실패 시
+     */
+    private Long getProductRankFromRedis(Long productId, LocalDate date) {
         String key = keyGenerator.generateDailyKey(date);
         Long rank = zSetTemplate.getRank(key, String.valueOf(productId));
 
