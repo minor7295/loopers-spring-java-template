@@ -2,7 +2,6 @@ package com.loopers.interfaces.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.application.eventhandled.EventHandledService;
-import com.loopers.application.ranking.RankingService;
 import com.loopers.confg.kafka.KafkaConfig;
 import com.loopers.domain.event.LikeEvent;
 import com.loopers.domain.event.OrderEvent;
@@ -11,18 +10,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
 import java.util.List;
 
 /**
  * 랭킹 집계 Kafka Consumer.
  * <p>
- * Kafka에서 이벤트를 수취하여 Redis ZSET에 랭킹 점수를 적재합니다.
+ * Kafka에서 이벤트를 수취하여 Spring ApplicationEvent로 발행합니다.
  * 조회, 좋아요, 주문 이벤트를 기반으로 실시간 랭킹을 구축합니다.
  * </p>
  * <p>
@@ -43,20 +42,22 @@ import java.util.List;
  * <p>
  * <b>설계 원칙:</b>
  * <ul>
- *   <li>Eventually Consistent: 일시적인 지연/중복 허용</li>
- *   <li>CQRS Read Model: Write Side(도메인) → Kafka → Read Side(Application) → Redis ZSET</li>
+ *   <li><b>관심사 분리:</b> Consumer는 Kafka 메시지 수신/파싱만 담당, 비즈니스 로직은 EventHandler에서 처리</li>
+ *   <li><b>이벤트 핸들러 패턴:</b> Kafka Event → Spring ApplicationEvent → RankingEventListener → RankingEventHandler</li>
+ *   <li><b>Eventually Consistent:</b> 일시적인 지연/중복 허용</li>
+ *   <li><b>CQRS Read Model:</b> Write Side(도메인) → Kafka → Read Side(Application) → Redis ZSET</li>
  * </ul>
  * </p>
  *
  * @author Loopers
- * @version 1.0
+ * @version 2.0
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RankingConsumer {
 
-    private final RankingService rankingService;
+    private final ApplicationEventPublisher applicationEventPublisher;
     private final EventHandledService eventHandledService;
     private final ObjectMapper objectMapper;
 
@@ -104,28 +105,31 @@ public class RankingConsumer {
 
                     Object value = record.value();
                     String eventType;
-                    LocalDate date = LocalDate.now();
                     
                     // Spring Kafka가 자동으로 역직렬화한 경우
                     if (value instanceof LikeEvent.LikeAdded) {
                         LikeEvent.LikeAdded event = (LikeEvent.LikeAdded) value;
-                        rankingService.addLikeScore(event.productId(), date, true);
+                        // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                        applicationEventPublisher.publishEvent(event);
                         eventType = "LikeAdded";
                     } else if (value instanceof LikeEvent.LikeRemoved) {
                         LikeEvent.LikeRemoved event = (LikeEvent.LikeRemoved) value;
-                        rankingService.addLikeScore(event.productId(), date, false);
+                        // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                        applicationEventPublisher.publishEvent(event);
                         eventType = "LikeRemoved";
                     } else {
                         // JSON 문자열인 경우 이벤트 타입 헤더로 구분
                         String eventTypeHeader = extractEventType(record);
                         if ("LikeRemoved".equals(eventTypeHeader)) {
                             LikeEvent.LikeRemoved event = parseLikeRemovedEvent(value);
-                            rankingService.addLikeScore(event.productId(), date, false);
+                            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                            applicationEventPublisher.publishEvent(event);
                             eventType = "LikeRemoved";
                         } else {
                             // 기본값은 LikeAdded
                             LikeEvent.LikeAdded event = parseLikeEvent(value);
-                            rankingService.addLikeScore(event.productId(), date, true);
+                            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                            applicationEventPublisher.publishEvent(event);
                             eventType = "LikeAdded";
                         }
                     }
@@ -202,23 +206,8 @@ public class RankingConsumer {
                     Object value = record.value();
                     OrderEvent.OrderCreated event = parseOrderCreatedEvent(value);
                     
-                    LocalDate date = LocalDate.now();
-                    
-                    // 주문 아이템별로 점수 집계
-                    // 주의: OrderEvent.OrderCreated에는 개별 상품 가격 정보가 없으므로
-                    // subtotal을 totalQuantity로 나눠서 평균 단가를 구하고, 각 아이템의 quantity를 곱함
-                    int totalQuantity = event.orderItems().stream()
-                        .mapToInt(OrderEvent.OrderCreated.OrderItemInfo::quantity)
-                        .sum();
-                    
-                    if (totalQuantity > 0 && event.subtotal() != null) {
-                        double averagePrice = (double) event.subtotal() / totalQuantity;
-                        
-                        for (OrderEvent.OrderCreated.OrderItemInfo item : event.orderItems()) {
-                            double orderAmount = averagePrice * item.quantity();
-                            rankingService.addOrderScore(item.productId(), date, orderAmount);
-                        }
-                    }
+                    // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                    applicationEventPublisher.publishEvent(event);
 
                     // 이벤트 처리 기록 저장
                     eventHandledService.markAsHandled(eventId, "OrderCreated", "order-events");
@@ -284,9 +273,8 @@ public class RankingConsumer {
                     Object value = record.value();
                     ProductEvent.ProductViewed event = parseProductViewedEvent(value);
                     
-                    LocalDate date = LocalDate.now();
-                    
-                    rankingService.addViewScore(event.productId(), date);
+                    // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+                    applicationEventPublisher.publishEvent(event);
 
                     // 이벤트 처리 기록 저장
                     eventHandledService.markAsHandled(eventId, "ProductViewed", "product-events");

@@ -11,7 +11,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -243,5 +246,97 @@ class RankingServiceTest {
         
         // TTL 설정은 각 호출마다 수행됨 (incrementScore 내부에서 호출)
         verify(zSetTemplate, times(3)).setTtlIfNotExists(eq(expectedKey), eq(Duration.ofDays(2)));
+    }
+
+    @DisplayName("시간 단위 랭킹을 일간 랭킹으로 집계할 수 있다.")
+    @Test
+    void canAggregateHourlyToDaily() {
+        // arrange
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        String dailyKey = "ranking:all:20241215";
+        List<String> expectedHourlyKeys = new ArrayList<>();
+        
+        // 00시 ~ 23시 키 생성
+        for (int hour = 0; hour < 24; hour++) {
+            LocalDateTime dateTime = date.atTime(hour, 0);
+            String hourlyKey = "ranking:hourly:" + dateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHH"));
+            expectedHourlyKeys.add(hourlyKey);
+            when(keyGenerator.generateHourlyKey(dateTime)).thenReturn(hourlyKey);
+        }
+        
+        when(keyGenerator.generateDailyKey(date)).thenReturn(dailyKey);
+        when(zSetTemplate.unionStore(eq(dailyKey), any(List.class))).thenReturn(100L);
+
+        // act
+        Long result = rankingService.aggregateHourlyToDaily(date);
+
+        // assert
+        assertThat(result).isEqualTo(100L);
+        verify(keyGenerator).generateDailyKey(date);
+        
+        // 24개의 시간 단위 키 생성 확인
+        for (int hour = 0; hour < 24; hour++) {
+            LocalDateTime dateTime = date.atTime(hour, 0);
+            verify(keyGenerator).generateHourlyKey(dateTime);
+        }
+        
+        // ZUNIONSTORE 호출 확인
+        ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass(List.class);
+        verify(zSetTemplate).unionStore(eq(dailyKey), keysCaptor.capture());
+        List<String> capturedKeys = keysCaptor.getValue();
+        assertThat(capturedKeys).hasSize(24);
+        assertThat(capturedKeys).containsAll(expectedHourlyKeys);
+        
+        // TTL 설정 확인
+        verify(zSetTemplate).setTtlIfNotExists(eq(dailyKey), eq(Duration.ofDays(2)));
+    }
+
+    @DisplayName("Score Carry-Over로 오늘 랭킹을 내일 랭킹에 반영할 수 있다.")
+    @Test
+    void canCarryOverScore() {
+        // arrange
+        LocalDate today = LocalDate.of(2024, 12, 15);
+        LocalDate tomorrow = LocalDate.of(2024, 12, 16);
+        String todayKey = "ranking:all:20241215";
+        String tomorrowKey = "ranking:all:20241216";
+        double carryOverWeight = 0.1; // 10%
+
+        when(keyGenerator.generateDailyKey(today)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(tomorrow)).thenReturn(tomorrowKey);
+        when(zSetTemplate.unionStoreWithWeight(eq(tomorrowKey), eq(todayKey), eq(carryOverWeight)))
+            .thenReturn(50L);
+
+        // act
+        Long result = rankingService.carryOverScore(today, tomorrow, carryOverWeight);
+
+        // assert
+        assertThat(result).isEqualTo(50L);
+        verify(keyGenerator).generateDailyKey(today);
+        verify(keyGenerator).generateDailyKey(tomorrow);
+        verify(zSetTemplate).unionStoreWithWeight(eq(tomorrowKey), eq(todayKey), eq(carryOverWeight));
+        verify(zSetTemplate).setTtlIfNotExists(eq(tomorrowKey), eq(Duration.ofDays(2)));
+    }
+
+    @DisplayName("Score Carry-Over 가중치가 0일 때도 정상적으로 처리된다.")
+    @Test
+    void canCarryOverScore_withZeroWeight() {
+        // arrange
+        LocalDate today = LocalDate.of(2024, 12, 15);
+        LocalDate tomorrow = LocalDate.of(2024, 12, 16);
+        String todayKey = "ranking:all:20241215";
+        String tomorrowKey = "ranking:all:20241216";
+        double carryOverWeight = 0.0;
+
+        when(keyGenerator.generateDailyKey(today)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(tomorrow)).thenReturn(tomorrowKey);
+        when(zSetTemplate.unionStoreWithWeight(eq(tomorrowKey), eq(todayKey), eq(carryOverWeight)))
+            .thenReturn(0L);
+
+        // act
+        Long result = rankingService.carryOverScore(today, tomorrow, carryOverWeight);
+
+        // assert
+        assertThat(result).isEqualTo(0L);
+        verify(zSetTemplate).unionStoreWithWeight(eq(tomorrowKey), eq(todayKey), eq(carryOverWeight));
     }
 }

@@ -137,4 +137,91 @@ public class RedisZSetTemplate {
             return 0L;
         }
     }
+
+    /**
+     * 여러 ZSET을 합쳐서 새로운 ZSET을 생성합니다.
+     * <p>
+     * ZUNIONSTORE 명령어를 사용하여 여러 소스 ZSET의 점수를 합산합니다.
+     * 같은 멤버가 여러 ZSET에 있으면 점수가 합산됩니다.
+     * </p>
+     * <p>
+     * <b>사용 사례:</b>
+     * <ul>
+     *   <li>시간 단위 랭킹을 일간 랭킹으로 집계</li>
+     *   <li>Score Carry-Over: 오늘 랭킹을 내일 랭킹에 일부 반영</li>
+     * </ul>
+     * </p>
+     *
+     * @param destination 목적지 ZSET 키
+     * @param sourceKeys 소스 ZSET 키 목록
+     * @return 합쳐진 ZSET의 멤버 수
+     */
+    public Long unionStore(String destination, List<String> sourceKeys) {
+        try {
+            if (sourceKeys.isEmpty()) {
+                log.warn("소스 키가 비어있습니다: destination={}", destination);
+                return 0L;
+            }
+
+            Long result = redisTemplate.opsForZSet().unionAndStore(
+                sourceKeys.get(0),
+                sourceKeys.subList(1, sourceKeys.size()),
+                destination
+            );
+            return result != null ? result : 0L;
+        } catch (Exception e) {
+            log.warn("ZSET 합치기 실패: destination={}, sourceKeys={}", destination, sourceKeys, e);
+            return 0L;
+        }
+    }
+
+    /**
+     * 단일 ZSET을 가중치를 적용하여 목적지 ZSET에 합산합니다.
+     * <p>
+     * 소스 ZSET의 점수에 가중치를 곱한 후 목적지 ZSET에 합산합니다.
+     * 목적지 ZSET이 이미 존재하면 기존 점수에 합산됩니다.
+     * </p>
+     * <p>
+     * <b>사용 사례:</b>
+     * <ul>
+     *   <li>Score Carry-Over: 오늘 랭킹을 0.1 배율로 내일 랭킹에 반영</li>
+     * </ul>
+     * </p>
+     *
+     * @param destination 목적지 ZSET 키
+     * @param sourceKey 소스 ZSET 키
+     * @param weight 가중치 (예: 0.1 = 10%)
+     * @return 합쳐진 ZSET의 멤버 수
+     */
+    public Long unionStoreWithWeight(String destination, String sourceKey, double weight) {
+        try {
+            // ZUNIONSTORE를 사용하여 가중치 적용
+            // destination과 sourceKey를 합치되, sourceKey에만 가중치 적용
+            // 이를 위해 임시 키를 사용하거나 직접 구현
+            
+            // 방법: sourceKey의 모든 멤버를 읽어서 가중치를 적용한 후 destination에 추가
+            Set<ZSetOperations.TypedTuple<String>> sourceMembers = redisTemplate.opsForZSet()
+                .rangeWithScores(sourceKey, 0, -1);
+            
+            if (sourceMembers == null || sourceMembers.isEmpty()) {
+                return 0L;
+            }
+            
+            // 가중치를 적용하여 destination에 추가
+            for (ZSetOperations.TypedTuple<String> tuple : sourceMembers) {
+                String member = tuple.getValue();
+                Double originalScore = tuple.getScore();
+                if (member != null && originalScore != null) {
+                    double weightedScore = originalScore * weight;
+                    redisTemplate.opsForZSet().incrementScore(destination, member, weightedScore);
+                }
+            }
+            
+            return (long) sourceMembers.size();
+        } catch (Exception e) {
+            log.warn("ZSET 가중치 합치기 실패: destination={}, sourceKey={}, weight={}", 
+                destination, sourceKey, weight, e);
+            return 0L;
+        }
+    }
 }

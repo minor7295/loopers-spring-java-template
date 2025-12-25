@@ -2,7 +2,6 @@ package com.loopers.interfaces.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loopers.application.eventhandled.EventHandledService;
-import com.loopers.application.ranking.RankingService;
 import com.loopers.domain.event.LikeEvent;
 import com.loopers.domain.event.OrderEvent;
 import com.loopers.domain.event.ProductEvent;
@@ -17,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.support.Acknowledgment;
 
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.*;
 class RankingConsumerTest {
 
     @Mock
-    private RankingService rankingService;
+    private ApplicationEventPublisher applicationEventPublisher;
 
     @Mock
     private EventHandledService eventHandledService;
@@ -73,7 +73,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService).addLikeScore(eq(productId), any(), eq(true));
+        verify(applicationEventPublisher).publishEvent(any(LikeEvent.LikeAdded.class));
         verify(eventHandledService).markAsHandled(eventId, "LikeAdded", "like-events");
         verify(acknowledgment).acknowledge();
     }
@@ -103,7 +103,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService).addLikeScore(eq(productId), any(), eq(false));
+        verify(applicationEventPublisher).publishEvent(any(LikeEvent.LikeRemoved.class));
         verify(eventHandledService).markAsHandled(eventId, "LikeRemoved", "like-events");
         verify(acknowledgment).acknowledge();
     }
@@ -142,13 +142,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        
-        // 평균 단가 계산: 10000 / (3 + 2) = 2000
-        // productId1: 2000 * 3 = 6000
-        // productId2: 2000 * 2 = 4000
-        verify(rankingService).addOrderScore(eq(productId1), any(), eq(6000.0));
-        verify(rankingService).addOrderScore(eq(productId2), any(), eq(4000.0));
-        
+        verify(applicationEventPublisher).publishEvent(any(OrderEvent.OrderCreated.class));
         verify(eventHandledService).markAsHandled(eventId, "OrderCreated", "order-events");
         verify(acknowledgment).acknowledge();
     }
@@ -177,7 +171,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService).addViewScore(eq(productId), any());
+        verify(applicationEventPublisher).publishEvent(any(ProductEvent.ProductViewed.class));
         verify(eventHandledService).markAsHandled(eventId, "ProductViewed", "product-events");
         verify(acknowledgment).acknowledge();
     }
@@ -214,8 +208,8 @@ class RankingConsumerTest {
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId1);
         verify(eventHandledService).isAlreadyHandled(eventId2);
-        verify(rankingService).addLikeScore(eq(productId), any(), eq(true));
-        verify(rankingService).addViewScore(eq(productId), any());
+        verify(applicationEventPublisher).publishEvent(any(LikeEvent.LikeAdded.class));
+        verify(applicationEventPublisher).publishEvent(any(ProductEvent.ProductViewed.class));
         verify(eventHandledService).markAsHandled(eventId1, "LikeAdded", "like-events");
         verify(eventHandledService).markAsHandled(eventId2, "ProductViewed", "product-events");
         verify(acknowledgment, times(2)).acknowledge();
@@ -245,7 +239,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService, never()).addLikeScore(any(), any(), anyBoolean());
+        verify(applicationEventPublisher, never()).publishEvent(any());
         verify(eventHandledService, never()).markAsHandled(any(), any(), any());
         verify(acknowledgment).acknowledge();
     }
@@ -268,7 +262,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService, never()).isAlreadyHandled(any());
-        verify(rankingService, never()).addLikeScore(any(), any(), anyBoolean());
+        verify(applicationEventPublisher, never()).publishEvent(any());
         verify(acknowledgment).acknowledge();
     }
 
@@ -291,8 +285,6 @@ class RankingConsumerTest {
         
         when(eventHandledService.isAlreadyHandled(eventId1)).thenReturn(false);
         when(eventHandledService.isAlreadyHandled(eventId2)).thenReturn(false);
-        doThrow(new RuntimeException("처리 실패"))
-            .when(rankingService).addLikeScore(any(), any(), anyBoolean());
         
         List<ConsumerRecord<String, Object>> records = List.of(
             new ConsumerRecord<>("like-events", 0, 0L, 0L, TimestampType.CREATE_TIME, 0, 0, "key", invalidEvent, headers1, Optional.empty()),
@@ -305,7 +297,9 @@ class RankingConsumerTest {
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId1);
         verify(eventHandledService).isAlreadyHandled(eventId2);
-        verify(rankingService, atLeastOnce()).addLikeScore(any(), any(), anyBoolean());
+        // 첫 번째 이벤트는 파싱 실패로 publishEvent가 호출되지 않음
+        // 두 번째 이벤트는 정상적으로 publishEvent가 호출됨
+        verify(applicationEventPublisher, times(1)).publishEvent(any(LikeEvent.LikeAdded.class));
         verify(acknowledgment).acknowledge();
     }
 
@@ -335,7 +329,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService).addLikeScore(eq(productId), any(), eq(true));
+        verify(applicationEventPublisher).publishEvent(any(LikeEvent.LikeAdded.class));
         verify(eventHandledService).markAsHandled(eventId, "LikeAdded", "like-events");
         verify(acknowledgment).acknowledge();
     }
@@ -371,7 +365,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService, never()).addOrderScore(any(), any(), anyDouble());
+        verify(applicationEventPublisher).publishEvent(any(OrderEvent.OrderCreated.class));
         verify(eventHandledService).markAsHandled(eventId, "OrderCreated", "order-events");
         verify(acknowledgment).acknowledge();
     }
@@ -407,7 +401,7 @@ class RankingConsumerTest {
 
         // assert
         verify(eventHandledService).isAlreadyHandled(eventId);
-        verify(rankingService, never()).addOrderScore(any(), any(), anyDouble());
+        verify(applicationEventPublisher).publishEvent(any(OrderEvent.OrderCreated.class));
         verify(eventHandledService).markAsHandled(eventId, "OrderCreated", "order-events");
         verify(acknowledgment).acknowledge();
     }
@@ -444,8 +438,8 @@ class RankingConsumerTest {
         // isAlreadyHandled는 3번 호출됨 (각 메시지마다)
         verify(eventHandledService, times(3)).isAlreadyHandled(eventId);
         
-        // addLikeScore는 한 번만 호출되어야 함 (첫 번째 메시지만 처리)
-        verify(rankingService, times(1)).addLikeScore(eq(productId), any(), eq(true));
+        // publishEvent는 한 번만 호출되어야 함 (첫 번째 메시지만 처리)
+        verify(applicationEventPublisher, times(1)).publishEvent(any(LikeEvent.LikeAdded.class));
         
         // markAsHandled는 한 번만 호출되어야 함 (첫 번째 메시지만 처리)
         verify(eventHandledService, times(1)).markAsHandled(eventId, "LikeAdded", "like-events");
