@@ -397,4 +397,159 @@ class RankingServiceTest {
         // 브랜드는 한 번만 조회됨 (중복 제거)
         verify(brandService).getBrands(List.of(brandId));
     }
+
+    @DisplayName("Redis 장애 시 전날 랭킹으로 Fallback한다.")
+    @Test
+    void fallbackToYesterdayRanking_whenRedisFails() {
+        // arrange
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        LocalDate yesterday = date.minusDays(1);
+        int page = 0;
+        int size = 20;
+        String todayKey = "ranking:all:20241215";
+        String yesterdayKey = "ranking:all:20241214";
+
+        Long productId = 1L;
+        Long brandId = 10L;
+
+        List<ZSetEntry> yesterdayEntries = List.of(
+            new ZSetEntry(String.valueOf(productId), 100.0)
+        );
+
+        Product product = Product.of("상품", 10000, 10, brandId);
+        Brand brand = Brand.of("브랜드");
+
+        // ID 설정
+        setId(product, productId);
+        setId(brand, brandId);
+
+        when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
+        
+        // 오늘 랭킹 조회 시 예외 발생
+        when(zSetTemplate.getTopRankings(todayKey, 0L, 19L))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 전날 랭킹 조회 성공
+        when(zSetTemplate.getTopRankings(yesterdayKey, 0L, 19L)).thenReturn(yesterdayEntries);
+        when(zSetTemplate.getSize(yesterdayKey)).thenReturn(1L);
+        when(productService.getProducts(List.of(productId))).thenReturn(List.of(product));
+        when(brandService.getBrands(List.of(brandId))).thenReturn(List.of(brand));
+
+        // act
+        RankingService.RankingsResponse result = rankingService.getRankings(date, page, size);
+
+        // assert
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).productDetail().getId()).isEqualTo(productId);
+        verify(zSetTemplate).getTopRankings(todayKey, 0L, 19L);
+        verify(zSetTemplate).getTopRankings(yesterdayKey, 0L, 19L);
+    }
+
+    @DisplayName("Redis 장애 시 전날 랭킹도 없으면 기본 랭킹(좋아요순)으로 Fallback한다.")
+    @Test
+    void fallbackToDefaultRanking_whenRedisAndYesterdayRankingFail() {
+        // arrange
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        LocalDate yesterday = date.minusDays(1);
+        int page = 0;
+        int size = 20;
+        String todayKey = "ranking:all:20241215";
+        String yesterdayKey = "ranking:all:20241214";
+
+        Long productId = 1L;
+        Long brandId = 10L;
+
+        Product product = Product.of("상품", 10000, 10, brandId);
+        Brand brand = Brand.of("브랜드");
+
+        // ID 설정
+        setId(product, productId);
+        setId(brand, brandId);
+
+        when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
+        
+        // 오늘 랭킹 조회 시 예외 발생
+        when(zSetTemplate.getTopRankings(todayKey, 0L, 19L))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 전날 랭킹 조회도 예외 발생
+        when(zSetTemplate.getTopRankings(yesterdayKey, 0L, 19L))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 기본 랭킹(좋아요순) 조회
+        when(productService.findAll(null, "likes_desc", page, size)).thenReturn(List.of(product));
+        when(productService.countAll(null)).thenReturn(1L);
+        when(brandService.getBrands(List.of(brandId))).thenReturn(List.of(brand));
+
+        // act
+        RankingService.RankingsResponse result = rankingService.getRankings(date, page, size);
+
+        // assert
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).productDetail().getId()).isEqualTo(productId);
+        assertThat(result.items().get(0).score()).isEqualTo(product.getLikeCount().doubleValue());
+        verify(productService).findAll(null, "likes_desc", page, size);
+    }
+
+    @DisplayName("Redis 장애 시 상품 순위 조회도 전날 랭킹으로 Fallback한다.")
+    @Test
+    void fallbackToYesterdayRanking_whenGetProductRankFails() {
+        // arrange
+        Long productId = 1L;
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        LocalDate yesterday = date.minusDays(1);
+        String todayKey = "ranking:all:20241215";
+        String yesterdayKey = "ranking:all:20241214";
+        Long rank = 5L; // 0-based
+
+        when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
+        
+        // 오늘 랭킹 조회 시 예외 발생
+        when(zSetTemplate.getRank(todayKey, String.valueOf(productId)))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 전날 랭킹 조회 성공
+        when(zSetTemplate.getRank(yesterdayKey, String.valueOf(productId))).thenReturn(rank);
+
+        // act
+        Long result = rankingService.getProductRank(productId, date);
+
+        // assert
+        assertThat(result).isEqualTo(6L); // 1-based (5 + 1)
+        verify(zSetTemplate).getRank(todayKey, String.valueOf(productId));
+        verify(zSetTemplate).getRank(yesterdayKey, String.valueOf(productId));
+    }
+
+    @DisplayName("Redis 장애 시 상품 순위 조회도 전날 랭킹이 없으면 null을 반환한다.")
+    @Test
+    void returnsNull_whenRedisAndYesterdayRankingFail() {
+        // arrange
+        Long productId = 1L;
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        LocalDate yesterday = date.minusDays(1);
+        String todayKey = "ranking:all:20241215";
+        String yesterdayKey = "ranking:all:20241214";
+
+        when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
+        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
+        
+        // 오늘 랭킹 조회 시 예외 발생
+        when(zSetTemplate.getRank(todayKey, String.valueOf(productId)))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 전날 랭킹 조회도 예외 발생
+        when(zSetTemplate.getRank(yesterdayKey, String.valueOf(productId)))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+
+        // act
+        Long result = rankingService.getProductRank(productId, date);
+
+        // assert
+        assertThat(result).isNull();
+        verify(zSetTemplate).getRank(todayKey, String.valueOf(productId));
+        verify(zSetTemplate).getRank(yesterdayKey, String.valueOf(productId));
+    }
 }
