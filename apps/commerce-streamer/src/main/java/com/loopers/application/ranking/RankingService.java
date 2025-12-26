@@ -7,9 +7,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -121,36 +118,6 @@ public class RankingService {
         zSetTemplate.setTtlIfNotExists(key, TTL);
         
         log.debug("배치 점수 적재 완료: date={}, count={}", date, scoreMap.size());
-    }
-
-    /**
-     * 시간 단위 랭킹을 일간 랭킹으로 집계합니다.
-     * <p>
-     * 하루의 모든 시간 단위 랭킹을 ZUNIONSTORE로 합쳐서 일간 랭킹을 생성합니다.
-     * </p>
-     *
-     * @param date 날짜
-     * @return 집계된 멤버 수
-     */
-    public Long aggregateHourlyToDaily(LocalDate date) {
-        String dailyKey = keyGenerator.generateDailyKey(date);
-        List<String> hourlyKeys = new ArrayList<>();
-        
-        // 해당 날짜의 모든 시간 단위 키 생성 (00시 ~ 23시)
-        for (int hour = 0; hour < 24; hour++) {
-            LocalDateTime dateTime = date.atTime(hour, 0);
-            String hourlyKey = keyGenerator.generateHourlyKey(dateTime);
-            hourlyKeys.add(hourlyKey);
-        }
-        
-        // ZUNIONSTORE로 모든 시간 단위 랭킹을 일간 랭킹으로 집계
-        Long result = zSetTemplate.unionStore(dailyKey, hourlyKeys);
-        
-        // TTL 설정
-        zSetTemplate.setTtlIfNotExists(dailyKey, TTL);
-        
-        log.info("시간 단위 랭킹을 일간 랭킹으로 집계 완료: date={}, memberCount={}", date, result);
-        return result;
     }
 
     /**

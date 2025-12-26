@@ -3,13 +3,13 @@ package com.loopers.interfaces.api.ranking;
 import com.loopers.application.ranking.RankingService;
 import com.loopers.interfaces.api.ApiResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 
@@ -76,14 +76,14 @@ public class RankingV1Controller {
      */
     private LocalDate parseDate(String dateStr) {
         if (dateStr == null || dateStr.isBlank()) {
-            return LocalDate.now();
+            return LocalDate.now(ZoneId.of("UTC"));
         }
 
         try {
             return LocalDate.parse(dateStr, DATE_FORMATTER);
         } catch (DateTimeParseException e) {
-            // 파싱 실패 시 오늘 날짜 반환
-            return LocalDate.now();
+            // 파싱 실패 시 오늘 날짜 반환 (UTC 기준)
+            return LocalDate.now(ZoneId.of("UTC"));
         }
     }
 }

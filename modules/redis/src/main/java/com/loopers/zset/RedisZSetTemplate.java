@@ -78,14 +78,10 @@ public class RedisZSetTemplate {
      * @param key ZSET 키
      * @param member 멤버
      * @return 순위 (0부터 시작, 없으면 null)
+     * @throws org.springframework.dao.DataAccessException Redis 접근 실패 시
      */
     public Long getRank(String key, String member) {
-        try {
-            return redisTemplate.opsForZSet().reverseRank(key, member);
-        } catch (Exception e) {
-            log.warn("ZSET 순위 조회 실패: key={}, member={}", key, member, e);
-            return null;
-        }
+        return redisTemplate.opsForZSet().reverseRank(key, member);
     }
 
     /**
@@ -98,25 +94,21 @@ public class RedisZSetTemplate {
      * @param start 시작 인덱스 (0부터 시작)
      * @param end 종료 인덱스 (포함)
      * @return 멤버와 점수 쌍의 리스트
+     * @throws org.springframework.dao.DataAccessException Redis 접근 실패 시
      */
     public List<ZSetEntry> getTopRankings(String key, long start, long end) {
-        try {
-            Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
-                .reverseRangeWithScores(key, start, end);
-            
-            if (tuples == null) {
-                return List.of();
-            }
-            
-            List<ZSetEntry> entries = new ArrayList<>();
-            for (ZSetOperations.TypedTuple<String> tuple : tuples) {
-                entries.add(new ZSetEntry(tuple.getValue(), tuple.getScore()));
-            }
-            return entries;
-        } catch (Exception e) {
-            log.warn("ZSET 상위 랭킹 조회 실패: key={}, start={}, end={}", key, start, end, e);
+        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
+            .reverseRangeWithScores(key, start, end);
+        
+        if (tuples == null) {
             return List.of();
         }
+        
+        List<ZSetEntry> entries = new ArrayList<>();
+        for (ZSetOperations.TypedTuple<String> tuple : tuples) {
+            entries.add(new ZSetEntry(tuple.getValue(), tuple.getScore()));
+        }
+        return entries;
     }
 
     /**
@@ -127,15 +119,11 @@ public class RedisZSetTemplate {
      *
      * @param key ZSET 키
      * @return ZSET 크기 (없으면 0)
+     * @throws org.springframework.dao.DataAccessException Redis 접근 실패 시
      */
     public Long getSize(String key) {
-        try {
-            Long size = redisTemplate.opsForZSet().size(key);
-            return size != null ? size : 0L;
-        } catch (Exception e) {
-            log.warn("ZSET 크기 조회 실패: key={}", key, e);
-            return 0L;
-        }
+        Long size = redisTemplate.opsForZSet().size(key);
+        return size != null ? size : 0L;
     }
 
     /**

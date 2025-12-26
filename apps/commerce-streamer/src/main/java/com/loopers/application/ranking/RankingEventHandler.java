@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 /**
  * 랭킹 이벤트 핸들러.
@@ -42,7 +43,7 @@ public class RankingEventHandler {
         log.debug("좋아요 추가 이벤트 처리: productId={}, userId={}", 
             event.productId(), event.userId());
         
-        LocalDate date = LocalDate.now();
+        LocalDate date = LocalDate.now(ZoneId.of("UTC"));
         rankingService.addLikeScore(event.productId(), date, true);
         
         log.debug("좋아요 점수 추가 완료: productId={}", event.productId());
@@ -57,7 +58,7 @@ public class RankingEventHandler {
         log.debug("좋아요 취소 이벤트 처리: productId={}, userId={}", 
             event.productId(), event.userId());
         
-        LocalDate date = LocalDate.now();
+        LocalDate date = LocalDate.now(ZoneId.of("UTC"));
         rankingService.addLikeScore(event.productId(), date, false);
         
         log.debug("좋아요 점수 차감 완료: productId={}", event.productId());
@@ -79,7 +80,7 @@ public class RankingEventHandler {
     public void handleOrderCreated(OrderEvent.OrderCreated event) {
         log.debug("주문 생성 이벤트 처리: orderId={}", event.orderId());
         
-        LocalDate date = LocalDate.now();
+        LocalDate date = LocalDate.now(ZoneId.of("UTC"));
         
         // 주문 아이템별로 점수 집계
         // 주의: OrderEvent.OrderCreated에는 개별 상품 가격 정보가 없으므로
@@ -108,7 +109,7 @@ public class RankingEventHandler {
     public void handleProductViewed(ProductEvent.ProductViewed event) {
         log.debug("상품 조회 이벤트 처리: productId={}", event.productId());
         
-        LocalDate date = LocalDate.now();
+        LocalDate date = LocalDate.now(ZoneId.of("UTC"));
         rankingService.addViewScore(event.productId(), date);
         
         log.debug("조회 점수 추가 완료: productId={}", event.productId());
