@@ -7,6 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 /**
  * 랭킹 Score Carry-Over 스케줄러.
@@ -49,7 +50,7 @@ public class RankingCarryOverScheduler {
      */
     @Scheduled(cron = "0 0 0 * * ?") // 매일 자정 (00:00:00)
     public void carryOverScore() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.of("UTC"));
         LocalDate yesterday = today.minusDays(1);
 
         try {

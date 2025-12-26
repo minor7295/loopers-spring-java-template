@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 /**
  * 랭킹 스냅샷 저장 스케줄러.
@@ -50,7 +51,7 @@ public class RankingSnapshotScheduler {
      */
     @Scheduled(fixedRate = 3600000) // 1시간마다 (3600000ms = 1시간)
     public void saveRankingSnapshot() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.of("UTC"));
         try {
             // 상위 100개 랭킹을 스냅샷으로 저장 (대부분의 사용자가 상위 100개 이내만 조회)
             // Redis가 정상일 때만 스냅샷 저장 (예외 발생 시 스킵)

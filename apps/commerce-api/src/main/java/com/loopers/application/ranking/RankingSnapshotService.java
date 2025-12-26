@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Optional;
@@ -81,7 +82,7 @@ public class RankingSnapshotService {
         }
 
         // 가장 오래된 스냅샷 제거
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.of("UTC"));
         LocalDate oldestDate = today.minusDays(MAX_SNAPSHOTS);
         
         snapshotCache.entrySet().removeIf(entry -> {
