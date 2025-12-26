@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -44,6 +45,7 @@ public class RankingService {
     private final RankingKeyGenerator keyGenerator;
     private final ProductService productService;
     private final BrandService brandService;
+    private final RankingSnapshotService rankingSnapshotService;
 
     /**
      * 랭킹을 조회합니다 (페이징).
@@ -53,8 +55,8 @@ public class RankingService {
      * <p>
      * <b>Graceful Degradation:</b>
      * <ul>
-     *   <li>Redis 장애 시 전날 랭킹으로 Fallback</li>
-     *   <li>전날 랭킹도 없으면 기본 랭킹(좋아요순) 제공</li>
+     *   <li>Redis 장애 시 스냅샷으로 Fallback</li>
+     *   <li>스냅샷도 없으면 기본 랭킹(좋아요순) 제공 (단순 조회, 계산 아님)</li>
      * </ul>
      * </p>
      *
@@ -68,18 +70,25 @@ public class RankingService {
         try {
             return getRankingsFromRedis(date, page, size);
         } catch (DataAccessException e) {
-            log.warn("Redis 랭킹 조회 실패, 전날 랭킹으로 Fallback: date={}, error={}", 
+            log.warn("Redis 랭킹 조회 실패, 스냅샷으로 Fallback: date={}, error={}", 
                 date, e.getMessage());
-            // 전날 랭킹으로 Fallback 시도
-            try {
-                LocalDate yesterday = date.minusDays(1);
-                return getRankingsFromRedis(yesterday, page, size);
-            } catch (DataAccessException fallbackException) {
-                log.warn("전날 랭킹 조회도 실패, 기본 랭킹(좋아요순)으로 Fallback: date={}, error={}", 
-                    date, fallbackException.getMessage());
-                // 기본 랭킹(좋아요순) 제공
-                return getDefaultRankings(page, size);
+            // 스냅샷으로 Fallback 시도
+            Optional<RankingsResponse> snapshot = rankingSnapshotService.getSnapshot(date);
+            if (snapshot.isPresent()) {
+                log.info("스냅샷으로 랭킹 제공: date={}, itemCount={}", date, snapshot.get().items().size());
+                return snapshot.get();
             }
+            
+            // 전날 스냅샷 시도
+            Optional<RankingsResponse> yesterdaySnapshot = rankingSnapshotService.getSnapshot(date.minusDays(1));
+            if (yesterdaySnapshot.isPresent()) {
+                log.info("전날 스냅샷으로 랭킹 제공: date={}, itemCount={}", date, yesterdaySnapshot.get().items().size());
+                return yesterdaySnapshot.get();
+            }
+            
+            // 최종 Fallback: 기본 랭킹 (단순 조회, 계산 아님)
+            log.warn("스냅샷도 없음, 기본 랭킹(좋아요순)으로 Fallback: date={}", date);
+            return getDefaultRankings(page, size);
         } catch (Exception e) {
             log.error("랭킹 조회 중 예상치 못한 오류 발생, 기본 랭킹으로 Fallback: date={}", date, e);
             return getDefaultRankings(page, size);
@@ -88,6 +97,9 @@ public class RankingService {
 
     /**
      * Redis에서 랭킹을 조회합니다.
+     * <p>
+     * 스케줄러에서 스냅샷 저장 시 호출하기 위해 public으로 제공합니다.
+     * </p>
      *
      * @param date 날짜
      * @param page 페이지 번호
@@ -95,7 +107,7 @@ public class RankingService {
      * @return 랭킹 조회 결과
      * @throws DataAccessException Redis 접근 실패 시
      */
-    private RankingsResponse getRankingsFromRedis(LocalDate date, int page, int size) {
+    public RankingsResponse getRankingsFromRedis(LocalDate date, int page, int size) {
         String key = keyGenerator.generateDailyKey(date);
         long start = (long) page * size;
         long end = start + size - 1;
@@ -172,7 +184,8 @@ public class RankingService {
     /**
      * 기본 랭킹(좋아요순)을 제공합니다.
      * <p>
-     * Redis 장애 시 Fallback으로 사용됩니다.
+     * 최종 Fallback으로 사용됩니다. 랭킹을 새로 계산하는 것이 아니라
+     * 이미 집계된 좋아요 수를 단순 조회하는 것이므로 DB 부하가 크지 않습니다.
      * </p>
      *
      * @param page 페이지 번호 (0부터 시작)
