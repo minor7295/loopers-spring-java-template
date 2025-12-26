@@ -7,7 +7,6 @@ import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
 import com.loopers.zset.RedisZSetTemplate;
 import com.loopers.zset.ZSetEntry;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,12 +45,6 @@ class RankingServiceTest {
 
     @InjectMocks
     private RankingService rankingService;
-
-    @BeforeEach
-    void setUp() {
-        // 기본적으로 스냅샷은 없음 (Redis가 정상 동작하는 경우)
-        when(rankingSnapshotService.getSnapshot(any())).thenReturn(java.util.Optional.empty());
-    }
 
     /**
      * Product에 ID를 설정합니다 (리플렉션 사용).
