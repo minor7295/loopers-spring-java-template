@@ -4,8 +4,10 @@ import com.loopers.application.brand.BrandService;
 import com.loopers.application.product.ProductService;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.product.Product;
+import com.loopers.domain.product.ProductDetail;
 import com.loopers.zset.RedisZSetTemplate;
 import com.loopers.zset.ZSetEntry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,8 +41,17 @@ class RankingServiceTest {
     @Mock
     private BrandService brandService;
 
+    @Mock
+    private RankingSnapshotService rankingSnapshotService;
+
     @InjectMocks
     private RankingService rankingService;
+
+    @BeforeEach
+    void setUp() {
+        // 기본적으로 스냅샷은 없음 (Redis가 정상 동작하는 경우)
+        when(rankingSnapshotService.getSnapshot(any())).thenReturn(java.util.Optional.empty());
+    }
 
     /**
      * Product에 ID를 설정합니다 (리플렉션 사용).
@@ -398,23 +409,17 @@ class RankingServiceTest {
         verify(brandService).getBrands(List.of(brandId));
     }
 
-    @DisplayName("Redis 장애 시 전날 랭킹으로 Fallback한다.")
+    @DisplayName("Redis 장애 시 스냅샷으로 Fallback한다.")
     @Test
-    void fallbackToYesterdayRanking_whenRedisFails() {
+    void fallbackToSnapshot_whenRedisFails() {
         // arrange
         LocalDate date = LocalDate.of(2024, 12, 15);
-        LocalDate yesterday = date.minusDays(1);
         int page = 0;
         int size = 20;
         String todayKey = "ranking:all:20241215";
-        String yesterdayKey = "ranking:all:20241214";
 
         Long productId = 1L;
         Long brandId = 10L;
-
-        List<ZSetEntry> yesterdayEntries = List.of(
-            new ZSetEntry(String.valueOf(productId), 100.0)
-        );
 
         Product product = Product.of("상품", 10000, 10, brandId);
         Brand brand = Brand.of("브랜드");
@@ -423,18 +428,22 @@ class RankingServiceTest {
         setId(product, productId);
         setId(brand, brandId);
 
+        RankingService.RankingItem rankingItem = new RankingService.RankingItem(
+            1L, 100.0, 
+            ProductDetail.from(product, brand.getName(), product.getLikeCount())
+        );
+        RankingService.RankingsResponse snapshot = new RankingService.RankingsResponse(
+            List.of(rankingItem), page, size, false
+        );
+
         when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
-        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
         
         // 오늘 랭킹 조회 시 예외 발생
         when(zSetTemplate.getTopRankings(todayKey, 0L, 19L))
             .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
         
-        // 전날 랭킹 조회 성공
-        when(zSetTemplate.getTopRankings(yesterdayKey, 0L, 19L)).thenReturn(yesterdayEntries);
-        when(zSetTemplate.getSize(yesterdayKey)).thenReturn(1L);
-        when(productService.getProducts(List.of(productId))).thenReturn(List.of(product));
-        when(brandService.getBrands(List.of(brandId))).thenReturn(List.of(brand));
+        // 스냅샷 조회 성공
+        when(rankingSnapshotService.getSnapshot(date)).thenReturn(java.util.Optional.of(snapshot));
 
         // act
         RankingService.RankingsResponse result = rankingService.getRankings(date, page, size);
@@ -443,19 +452,68 @@ class RankingServiceTest {
         assertThat(result.items()).hasSize(1);
         assertThat(result.items().get(0).productDetail().getId()).isEqualTo(productId);
         verify(zSetTemplate).getTopRankings(todayKey, 0L, 19L);
-        verify(zSetTemplate).getTopRankings(yesterdayKey, 0L, 19L);
+        verify(rankingSnapshotService).getSnapshot(date);
+        verify(rankingSnapshotService, never()).getSnapshot(date.minusDays(1));
     }
 
-    @DisplayName("Redis 장애 시 전날 랭킹도 없으면 기본 랭킹(좋아요순)으로 Fallback한다.")
+    @DisplayName("Redis 장애 시 스냅샷이 없으면 전날 스냅샷으로 Fallback한다.")
     @Test
-    void fallbackToDefaultRanking_whenRedisAndYesterdayRankingFail() {
+    void fallbackToYesterdaySnapshot_whenSnapshotNotAvailable() {
         // arrange
         LocalDate date = LocalDate.of(2024, 12, 15);
         LocalDate yesterday = date.minusDays(1);
         int page = 0;
         int size = 20;
         String todayKey = "ranking:all:20241215";
-        String yesterdayKey = "ranking:all:20241214";
+
+        Long productId = 1L;
+        Long brandId = 10L;
+
+        Product product = Product.of("상품", 10000, 10, brandId);
+        Brand brand = Brand.of("브랜드");
+
+        // ID 설정
+        setId(product, productId);
+        setId(brand, brandId);
+
+        RankingService.RankingItem rankingItem = new RankingService.RankingItem(
+            1L, 100.0, 
+            ProductDetail.from(product, brand.getName(), product.getLikeCount())
+        );
+        RankingService.RankingsResponse yesterdaySnapshot = new RankingService.RankingsResponse(
+            List.of(rankingItem), page, size, false
+        );
+
+        when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
+        
+        // 오늘 랭킹 조회 시 예외 발생
+        when(zSetTemplate.getTopRankings(todayKey, 0L, 19L))
+            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        
+        // 오늘 스냅샷 없음, 전날 스냅샷 있음
+        when(rankingSnapshotService.getSnapshot(date)).thenReturn(java.util.Optional.empty());
+        when(rankingSnapshotService.getSnapshot(yesterday)).thenReturn(java.util.Optional.of(yesterdaySnapshot));
+
+        // act
+        RankingService.RankingsResponse result = rankingService.getRankings(date, page, size);
+
+        // assert
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).productDetail().getId()).isEqualTo(productId);
+        verify(zSetTemplate).getTopRankings(todayKey, 0L, 19L);
+        verify(rankingSnapshotService).getSnapshot(date);
+        verify(rankingSnapshotService).getSnapshot(yesterday);
+    }
+
+    @DisplayName("Redis 장애 시 스냅샷도 없으면 기본 랭킹(좋아요순)으로 Fallback한다.")
+    @Test
+    void fallbackToDefaultRanking_whenSnapshotNotAvailable() {
+        // arrange
+        LocalDate date = LocalDate.of(2024, 12, 15);
+        LocalDate yesterday = date.minusDays(1);
+        int page = 0;
+        int size = 20;
+        String todayKey = "ranking:all:20241215";
 
         Long productId = 1L;
         Long brandId = 10L;
@@ -468,15 +526,14 @@ class RankingServiceTest {
         setId(brand, brandId);
 
         when(keyGenerator.generateDailyKey(date)).thenReturn(todayKey);
-        when(keyGenerator.generateDailyKey(yesterday)).thenReturn(yesterdayKey);
         
         // 오늘 랭킹 조회 시 예외 발생
         when(zSetTemplate.getTopRankings(todayKey, 0L, 19L))
             .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
         
-        // 전날 랭킹 조회도 예외 발생
-        when(zSetTemplate.getTopRankings(yesterdayKey, 0L, 19L))
-            .thenThrow(new org.springframework.dao.DataAccessException("Redis connection failed") {});
+        // 스냅샷도 없음
+        when(rankingSnapshotService.getSnapshot(date)).thenReturn(java.util.Optional.empty());
+        when(rankingSnapshotService.getSnapshot(yesterday)).thenReturn(java.util.Optional.empty());
         
         // 기본 랭킹(좋아요순) 조회
         when(productService.findAll(null, "likes_desc", page, size)).thenReturn(List.of(product));
@@ -490,6 +547,8 @@ class RankingServiceTest {
         assertThat(result.items()).hasSize(1);
         assertThat(result.items().get(0).productDetail().getId()).isEqualTo(productId);
         assertThat(result.items().get(0).score()).isEqualTo(product.getLikeCount().doubleValue());
+        verify(rankingSnapshotService).getSnapshot(date);
+        verify(rankingSnapshotService).getSnapshot(yesterday);
         verify(productService).findAll(null, "likes_desc", page, size);
     }
 
