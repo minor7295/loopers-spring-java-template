@@ -66,6 +66,87 @@ public class RankingConsumer {
     private static final String VERSION_HEADER = "version";
 
     /**
+     * 개별 레코드 처리 로직을 정의하는 함수형 인터페이스.
+     */
+    @FunctionalInterface
+    private interface RecordProcessor {
+        /**
+         * 개별 레코드를 처리합니다.
+         *
+         * @param record Kafka 메시지 레코드
+         * @param eventId 이벤트 ID
+         * @return 처리된 이벤트 타입과 토픽 이름을 담은 EventProcessResult
+         * @throws Exception 처리 중 발생한 예외
+         */
+        EventProcessResult process(ConsumerRecord<String, Object> record, String eventId) throws Exception;
+    }
+
+    /**
+     * 이벤트 처리 결과를 담는 레코드.
+     */
+    private record EventProcessResult(String eventType, String topicName) {
+    }
+
+    /**
+     * 공통 배치 처리 로직을 실행합니다.
+     * <p>
+     * 멱등성 체크, 에러 처리, 배치 커밋 등의 공통 로직을 처리합니다.
+     * </p>
+     *
+     * @param records Kafka 메시지 레코드 목록
+     * @param acknowledgment 수동 커밋을 위한 Acknowledgment
+     * @param topicName 토픽 이름 (로깅 및 이벤트 기록용)
+     * @param processor 개별 레코드 처리 로직
+     */
+    private void processBatch(
+        List<ConsumerRecord<String, Object>> records,
+        Acknowledgment acknowledgment,
+        String topicName,
+        RecordProcessor processor
+    ) {
+        try {
+            for (ConsumerRecord<String, Object> record : records) {
+                try {
+                    String eventId = extractEventId(record);
+                    if (eventId == null) {
+                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
+                            record.offset(), record.partition());
+                        continue;
+                    }
+
+                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
+                    if (eventHandledService.isAlreadyHandled(eventId)) {
+                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
+                        continue;
+                    }
+
+                    // 개별 레코드 처리
+                    EventProcessResult result = processor.process(record, eventId);
+                    
+                    // 이벤트 처리 기록 저장
+                    eventHandledService.markAsHandled(eventId, result.eventType(), result.topicName());
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
+                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
+                        record.offset(), record.partition());
+                } catch (Exception e) {
+                    log.error("이벤트 처리 실패: topic={}, offset={}, partition={}", 
+                        topicName, record.offset(), record.partition(), e);
+                    // 개별 이벤트 처리 실패는 로그만 기록하고 계속 진행
+                }
+            }
+            
+            // 모든 이벤트 처리 완료 후 수동 커밋
+            acknowledgment.acknowledge();
+            log.debug("이벤트 처리 완료: topic={}, count={}", topicName, records.size());
+        } catch (Exception e) {
+            log.error("배치 처리 실패: topic={}, count={}", topicName, records.size(), e);
+            // 에러 발생 시 커밋하지 않음 (재처리 가능)
+            throw e;
+        }
+    }
+
+    /**
      * like-events 토픽을 구독하여 좋아요 점수를 집계합니다.
      * <p>
      * <b>멱등성 처리:</b>
@@ -87,74 +168,36 @@ public class RankingConsumer {
         List<ConsumerRecord<String, Object>> records,
         Acknowledgment acknowledgment
     ) {
-        try {
-            for (ConsumerRecord<String, Object> record : records) {
-                try {
-                    String eventId = extractEventId(record);
-                    if (eventId == null) {
-                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
-                            record.offset(), record.partition());
-                        continue;
-                    }
-
-                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
-                    if (eventHandledService.isAlreadyHandled(eventId)) {
-                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
-                        continue;
-                    }
-
-                    Object value = record.value();
-                    String eventType;
-                    
-                    // Spring Kafka가 자동으로 역직렬화한 경우
-                    if (value instanceof LikeEvent.LikeAdded) {
-                        LikeEvent.LikeAdded event = (LikeEvent.LikeAdded) value;
-                        // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                        applicationEventPublisher.publishEvent(event);
-                        eventType = "LikeAdded";
-                    } else if (value instanceof LikeEvent.LikeRemoved) {
-                        LikeEvent.LikeRemoved event = (LikeEvent.LikeRemoved) value;
-                        // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                        applicationEventPublisher.publishEvent(event);
-                        eventType = "LikeRemoved";
-                    } else {
-                        // JSON 문자열인 경우 이벤트 타입 헤더로 구분
-                        String eventTypeHeader = extractEventType(record);
-                        if ("LikeRemoved".equals(eventTypeHeader)) {
-                            LikeEvent.LikeRemoved event = parseLikeRemovedEvent(value);
-                            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                            applicationEventPublisher.publishEvent(event);
-                            eventType = "LikeRemoved";
-                        } else {
-                            // 기본값은 LikeAdded
-                            LikeEvent.LikeAdded event = parseLikeEvent(value);
-                            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                            applicationEventPublisher.publishEvent(event);
-                            eventType = "LikeAdded";
-                        }
-                    }
-
-                    // 이벤트 처리 기록 저장
-                    eventHandledService.markAsHandled(eventId, eventType, "like-events");
-                } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
-                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
-                        record.offset(), record.partition());
-                } catch (Exception e) {
-                    log.error("좋아요 이벤트 처리 실패: offset={}, partition={}", 
-                        record.offset(), record.partition(), e);
-                    // 개별 이벤트 처리 실패는 로그만 기록하고 계속 진행
+        processBatch(records, acknowledgment, "like-events", (record, eventId) -> {
+            Object value = record.value();
+            String eventType;
+            
+            // Spring Kafka가 자동으로 역직렬화한 경우
+            if (value instanceof LikeEvent.LikeAdded) {
+                LikeEvent.LikeAdded event = (LikeEvent.LikeAdded) value;
+                applicationEventPublisher.publishEvent(event);
+                eventType = "LikeAdded";
+            } else if (value instanceof LikeEvent.LikeRemoved) {
+                LikeEvent.LikeRemoved event = (LikeEvent.LikeRemoved) value;
+                applicationEventPublisher.publishEvent(event);
+                eventType = "LikeRemoved";
+            } else {
+                // JSON 문자열인 경우 이벤트 타입 헤더로 구분
+                String eventTypeHeader = extractEventType(record);
+                if ("LikeRemoved".equals(eventTypeHeader)) {
+                    LikeEvent.LikeRemoved event = parseLikeRemovedEvent(value);
+                    applicationEventPublisher.publishEvent(event);
+                    eventType = "LikeRemoved";
+                } else {
+                    // 기본값은 LikeAdded
+                    LikeEvent.LikeAdded event = parseLikeEvent(value);
+                    applicationEventPublisher.publishEvent(event);
+                    eventType = "LikeAdded";
                 }
             }
             
-            // 모든 이벤트 처리 완료 후 수동 커밋
-            acknowledgment.acknowledge();
-            log.debug("좋아요 이벤트 처리 완료: count={}", records.size());
-        } catch (Exception e) {
-            log.error("좋아요 이벤트 배치 처리 실패: count={}", records.size(), e);
-            // 에러 발생 시 커밋하지 않음 (재처리 가능)
-            throw e;
-        }
+            return new EventProcessResult(eventType, "like-events");
+        });
     }
 
     /**
@@ -165,14 +208,6 @@ public class RankingConsumer {
      *   <li>Kafka 메시지 헤더에서 `eventId`를 추출</li>
      *   <li>이미 처리된 이벤트는 스킵하여 중복 처리 방지</li>
      *   <li>처리 후 `event_handled` 테이블에 기록</li>
-     * </ul>
-     * </p>
-     * <p>
-     * <b>주문 금액 계산:</b>
-     * <ul>
-     *   <li>OrderEvent.OrderCreated에는 개별 상품 가격 정보가 없음</li>
-     *   <li>subtotal을 totalQuantity로 나눠서 평균 단가를 구하고, 각 아이템의 quantity를 곱함</li>
-     *   <li>향후 개선: 주문 이벤트에 개별 상품 가격 정보 추가</li>
      * </ul>
      * </p>
      *
@@ -187,49 +222,15 @@ public class RankingConsumer {
         List<ConsumerRecord<String, Object>> records,
         Acknowledgment acknowledgment
     ) {
-        try {
-            for (ConsumerRecord<String, Object> record : records) {
-                try {
-                    String eventId = extractEventId(record);
-                    if (eventId == null) {
-                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
-                            record.offset(), record.partition());
-                        continue;
-                    }
-
-                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
-                    if (eventHandledService.isAlreadyHandled(eventId)) {
-                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
-                        continue;
-                    }
-
-                    Object value = record.value();
-                    OrderEvent.OrderCreated event = parseOrderCreatedEvent(value);
-                    
-                    // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                    applicationEventPublisher.publishEvent(event);
-
-                    // 이벤트 처리 기록 저장
-                    eventHandledService.markAsHandled(eventId, "OrderCreated", "order-events");
-                } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
-                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
-                        record.offset(), record.partition());
-                } catch (Exception e) {
-                    log.error("주문 이벤트 처리 실패: offset={}, partition={}", 
-                        record.offset(), record.partition(), e);
-                    // 개별 이벤트 처리 실패는 로그만 기록하고 계속 진행
-                }
-            }
+        processBatch(records, acknowledgment, "order-events", (record, eventId) -> {
+            Object value = record.value();
+            OrderEvent.OrderCreated event = parseOrderCreatedEvent(value);
             
-            // 모든 이벤트 처리 완료 후 수동 커밋
-            acknowledgment.acknowledge();
-            log.debug("주문 이벤트 처리 완료: count={}", records.size());
-        } catch (Exception e) {
-            log.error("주문 이벤트 배치 처리 실패: count={}", records.size(), e);
-            // 에러 발생 시 커밋하지 않음 (재처리 가능)
-            throw e;
-        }
+            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+            applicationEventPublisher.publishEvent(event);
+            
+            return new EventProcessResult("OrderCreated", "order-events");
+        });
     }
 
     /**
@@ -254,49 +255,15 @@ public class RankingConsumer {
         List<ConsumerRecord<String, Object>> records,
         Acknowledgment acknowledgment
     ) {
-        try {
-            for (ConsumerRecord<String, Object> record : records) {
-                try {
-                    String eventId = extractEventId(record);
-                    if (eventId == null) {
-                        log.warn("eventId가 없는 메시지는 건너뜁니다: offset={}, partition={}", 
-                            record.offset(), record.partition());
-                        continue;
-                    }
-
-                    // 멱등성 체크: 이미 처리된 이벤트는 스킵
-                    if (eventHandledService.isAlreadyHandled(eventId)) {
-                        log.debug("이미 처리된 이벤트 스킵: eventId={}", eventId);
-                        continue;
-                    }
-
-                    Object value = record.value();
-                    ProductEvent.ProductViewed event = parseProductViewedEvent(value);
-                    
-                    // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
-                    applicationEventPublisher.publishEvent(event);
-
-                    // 이벤트 처리 기록 저장
-                    eventHandledService.markAsHandled(eventId, "ProductViewed", "product-events");
-                } catch (org.springframework.dao.DataIntegrityViolationException e) {
-                    // UNIQUE 제약조건 위반 = 동시성 상황에서 이미 처리됨 (정상)
-                    log.debug("동시성 상황에서 이미 처리된 이벤트: offset={}, partition={}", 
-                        record.offset(), record.partition());
-                } catch (Exception e) {
-                    log.error("상품 조회 이벤트 처리 실패: offset={}, partition={}", 
-                        record.offset(), record.partition(), e);
-                    // 개별 이벤트 처리 실패는 로그만 기록하고 계속 진행
-                }
-            }
+        processBatch(records, acknowledgment, "product-events", (record, eventId) -> {
+            Object value = record.value();
+            ProductEvent.ProductViewed event = parseProductViewedEvent(value);
             
-            // 모든 이벤트 처리 완료 후 수동 커밋
-            acknowledgment.acknowledge();
-            log.debug("상품 조회 이벤트 처리 완료: count={}", records.size());
-        } catch (Exception e) {
-            log.error("상품 조회 이벤트 배치 처리 실패: count={}", records.size(), e);
-            // 에러 발생 시 커밋하지 않음 (재처리 가능)
-            throw e;
-        }
+            // Spring ApplicationEvent 발행 (애플리케이션 내부 이벤트)
+            applicationEventPublisher.publishEvent(event);
+            
+            return new EventProcessResult("ProductViewed", "product-events");
+        });
     }
 
     /**
