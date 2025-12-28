@@ -3,6 +3,7 @@ package com.loopers.application.catalog;
 import com.loopers.application.brand.BrandService;
 import com.loopers.application.product.ProductCacheService;
 import com.loopers.application.product.ProductService;
+import com.loopers.application.ranking.RankingService;
 import com.loopers.domain.brand.Brand;
 import com.loopers.domain.product.Product;
 import com.loopers.domain.product.ProductDetail;
@@ -14,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -34,6 +36,7 @@ public class CatalogFacade {
     private final ProductService productService;
     private final ProductCacheService productCacheService;
     private final ProductEventPublisher productEventPublisher;
+    private final RankingService rankingService;
 
     /**
      * 상품 목록을 조회합니다.
@@ -90,7 +93,7 @@ public class CatalogFacade {
                 }
                 // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
                 ProductDetail productDetail = ProductDetail.from(product, brand.getName(), product.getLikeCount());
-                return new ProductInfo(productDetail);
+                return ProductInfo.withoutRank(productDetail);
             })
             .toList();
         
@@ -108,10 +111,11 @@ public class CatalogFacade {
      * <p>
      * Redis 캐시를 먼저 확인하고, 캐시에 없으면 DB에서 조회한 후 캐시에 저장합니다.
      * 상품 조회 시 ProductViewed 이벤트를 발행하여 메트릭 집계에 사용합니다.
+     * 랭킹 정보도 함께 조회하여 반환합니다.
      * </p>
      *
      * @param productId 상품 ID
-     * @return 상품 정보와 좋아요 수
+     * @return 상품 정보와 좋아요 수, 랭킹 순위
      * @throws CoreException 상품을 찾을 수 없는 경우
      */
     @Transactional(readOnly = true)
@@ -121,7 +125,11 @@ public class CatalogFacade {
         if (cachedResult != null) {
             // 캐시 히트 시에도 조회 수 집계를 위해 이벤트 발행
             productEventPublisher.publish(ProductEvent.ProductViewed.from(productId));
-            return cachedResult;
+            
+            // 랭킹 정보 조회 (캐시된 결과에 랭킹 정보 추가)
+            LocalDate today = LocalDate.now();
+            Long rank = rankingService.getProductRank(productId, today);
+            return ProductInfo.withRank(cachedResult.productDetail(), rank);
         }
         
         // 캐시에 없으면 DB에서 조회
@@ -136,16 +144,19 @@ public class CatalogFacade {
         // ProductDetail 생성 (Aggregate 경계 준수: Brand 엔티티 대신 brandName만 전달)
         ProductDetail productDetail = ProductDetail.from(product, brand.getName(), likesCount);
         
-        ProductInfo result = new ProductInfo(productDetail);
+        // 랭킹 정보 조회
+        LocalDate today = LocalDate.now();
+        Long rank = rankingService.getProductRank(productId, today);
         
-        // 캐시에 저장
-        productCacheService.cacheProduct(productId, result);
+        // 캐시에 저장 (랭킹 정보는 제외하고 저장 - 랭킹은 실시간으로 조회)
+        productCacheService.cacheProduct(productId, ProductInfo.withoutRank(productDetail));
         
         // ✅ 상품 조회 이벤트 발행 (메트릭 집계용)
         productEventPublisher.publish(ProductEvent.ProductViewed.from(productId));
         
         // 로컬 캐시의 좋아요 수 델타 적용 (DB 조회 결과에도 델타 반영)
-        return productCacheService.applyLikeCountDelta(result);
+        ProductInfo deltaApplied = productCacheService.applyLikeCountDelta(ProductInfo.withoutRank(productDetail));
+        return ProductInfo.withRank(deltaApplied.productDetail(), rank);
     }
 
 }
