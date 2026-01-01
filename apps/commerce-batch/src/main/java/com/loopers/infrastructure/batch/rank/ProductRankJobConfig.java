@@ -2,6 +2,7 @@ package com.loopers.infrastructure.batch.rank;
 
 import com.loopers.domain.metrics.ProductMetrics;
 import com.loopers.domain.rank.ProductRank;
+import com.loopers.domain.rank.ProductRankScore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -30,8 +31,8 @@ import java.util.List;
  * <p>
  * <b>구현 의도:</b>
  * <ul>
- *   <li><b>주간 집계:</b> 해당 주의 월요일부터 일요일까지의 데이터를 집계</li>
- *   <li><b>월간 집계:</b> 해당 월의 1일부터 마지막 일까지의 데이터를 집계</li>
+ *   <li><b>Step 1 (집계 로직 계산):</b> 모든 ProductMetrics를 읽어서 product_id별로 점수 집계</li>
+ *   <li><b>Step 2 (랭킹 로직 실행):</b> 집계된 전체 데이터를 기반으로 TOP 100 선정 및 랭킹 번호 부여</li>
  *   <li><b>Chunk-Oriented Processing:</b> 대량 데이터를 메모리 효율적으로 처리</li>
  *   <li><b>Materialized View 저장:</b> 조회 성능 최적화를 위한 TOP 100 랭킹 저장</li>
  * </ul>
@@ -70,47 +71,97 @@ public class ProductRankJobConfig {
     private final PlatformTransactionManager transactionManager;
     private final ProductRankAggregationReader productRankAggregationReader;
     private final ProductRankAggregationProcessor productRankAggregationProcessor;
-    private final ProductRankAggregationWriter productRankAggregationWriter;
+    private final ProductRankScoreAggregationWriter productRankScoreAggregationWriter;
+    private final ProductRankCalculationReader productRankCalculationReader;
+    private final ProductRankCalculationProcessor productRankCalculationProcessor;
+    private final ProductRankCalculationWriter productRankCalculationWriter;
 
     /**
      * ProductRank 집계 Job을 생성합니다.
+     * <p>
+     * 2-Step 구조:
+     * <ol>
+     *   <li>Step 1: 집계 로직 계산 (점수 집계)</li>
+     *   <li>Step 2: 랭킹 로직 실행 (TOP 100 선정 및 랭킹 번호 부여)</li>
+     * </ol>
+     * </p>
      *
+     * @param scoreAggregationStep Step 1: 집계 로직 계산 Step
+     * @param rankingCalculationStep Step 2: 랭킹 로직 실행 Step
      * @return ProductRank 집계 Job
      */
     @Bean
-    public Job productRankAggregationJob(Step productRankAggregationStep) {
+    public Job productRankAggregationJob(
+        Step scoreAggregationStep,
+        Step rankingCalculationStep
+    ) {
         return new JobBuilder("productRankAggregationJob", jobRepository)
-            .start(productRankAggregationStep)
+            .start(scoreAggregationStep)        // Step 1 먼저 실행
+            .next(rankingCalculationStep)       // Step 1 완료 후 Step 2 실행
             .build();
     }
 
     /**
-     * ProductRank 집계 Step을 생성합니다.
+     * Step 1: 집계 로직 계산 Step을 생성합니다.
+     * <p>
+     * 모든 ProductMetrics를 읽어서 product_id별로 점수 집계하여 임시 테이블에 저장합니다.
+     * </p>
      * <p>
      * Chunk-Oriented Processing을 사용하여:
      * <ol>
      *   <li>Reader: 특정 기간의 product_metrics를 페이징하여 읽기</li>
-     *   <li>Processor: 메트릭을 합산하여 TOP 100 랭킹 생성</li>
-     *   <li>Writer: Materialized View에 저장</li>
+     *   <li>Processor: Pass-through (필터링 필요 시 추가 가능)</li>
+     *   <li>Writer: product_id별로 점수 집계하여 ProductRankScore 테이블에 저장</li>
      * </ol>
      * </p>
      *
      * @param productRankReader ProductRank Reader (StepScope Bean)
-     * @param productRankProcessor ProductRank Processor
-     * @param productRankWriter ProductRank Writer
-     * @return ProductRank 집계 Step
+     * @param productRankScoreWriter ProductRankScore Writer
+     * @return 집계 로직 계산 Step
      */
     @Bean
-    public Step productRankAggregationStep(
+    public Step scoreAggregationStep(
         ItemReader<ProductMetrics> productRankReader,
-        ItemProcessor<ProductMetrics, ProductMetrics> productRankProcessor,
-        ItemWriter<ProductMetrics> productRankWriter
+        ItemWriter<ProductMetrics> productRankScoreWriter
     ) {
-        return new StepBuilder("productRankAggregationStep", jobRepository)
+        return new StepBuilder("scoreAggregationStep", jobRepository)
             .<ProductMetrics, ProductMetrics>chunk(100, transactionManager) // Chunk 크기: 100
             .reader(productRankReader)
-            .processor(productRankProcessor)
-            .writer(productRankWriter)
+            .processor(item -> item) // Pass-through
+            .writer(productRankScoreWriter)
+            .build();
+    }
+
+    /**
+     * Step 2: 랭킹 로직 실행 Step을 생성합니다.
+     * <p>
+     * 집계된 전체 데이터를 기반으로 TOP 100 선정 및 랭킹 번호 부여하여 Materialized View에 저장합니다.
+     * </p>
+     * <p>
+     * Chunk-Oriented Processing을 사용하여:
+     * <ol>
+     *   <li>Reader: ProductRankScore 테이블에서 모든 데이터를 점수 내림차순으로 읽기</li>
+     *   <li>Processor: TOP 100 선정 및 랭킹 번호 부여</li>
+     *   <li>Writer: ProductRank를 수집하고 저장</li>
+     * </ol>
+     * </p>
+     *
+     * @param productRankScoreReader ProductRankScore Reader
+     * @param productRankCalculationProcessor ProductRank 계산 Processor
+     * @param productRankCalculationWriter ProductRank 계산 Writer
+     * @return 랭킹 로직 실행 Step
+     */
+    @Bean
+    public Step rankingCalculationStep(
+        ItemReader<ProductRankScore> productRankScoreReader,
+        ItemProcessor<ProductRankScore, ProductRank> productRankCalculationProcessor,
+        ItemWriter<ProductRank> productRankCalculationWriter
+    ) {
+        return new StepBuilder("rankingCalculationStep", jobRepository)
+            .<ProductRankScore, ProductRank>chunk(100, transactionManager) // Chunk 크기: 100
+            .reader(productRankScoreReader)
+            .processor(productRankCalculationProcessor)
+            .writer(productRankCalculationWriter)
             .build();
     }
 
@@ -144,26 +195,43 @@ public class ProductRankJobConfig {
     }
 
     /**
-     * ProductRank Processor를 주입받습니다.
-     * <p>
-     * 현재는 pass-through이지만, 향후 필터링 로직 추가 가능.
-     * </p>
+     * Step 1용 ProductRankScore Writer를 주입받습니다.
      *
-     * @return ProductRank Processor (pass-through)
+     * @return ProductRankScore Writer
      */
     @Bean
-    public ItemProcessor<ProductMetrics, ProductMetrics> productRankProcessor() {
-        return item -> item; // pass-through
+    public ItemWriter<ProductMetrics> productRankScoreWriter() {
+        return productRankScoreAggregationWriter;
     }
 
     /**
-     * ProductRank Writer를 주입받습니다.
+     * Step 2용 ProductRankScore Reader를 주입받습니다.
      *
-     * @return ProductRank Writer
+     * @return ProductRankScore Reader
      */
     @Bean
-    public ItemWriter<ProductMetrics> productRankWriter() {
-        return productRankAggregationWriter;
+    public ItemReader<ProductRankScore> productRankScoreReader() {
+        return productRankCalculationReader;
+    }
+
+    /**
+     * Step 2용 ProductRank 계산 Processor를 주입받습니다.
+     *
+     * @return ProductRank 계산 Processor
+     */
+    @Bean
+    public ItemProcessor<ProductRankScore, ProductRank> productRankCalculationProcessor() {
+        return productRankCalculationProcessor;
+    }
+
+    /**
+     * Step 2용 ProductRank 계산 Writer를 주입받습니다.
+     *
+     * @return ProductRank 계산 Writer
+     */
+    @Bean
+    public ItemWriter<ProductRank> productRankCalculationWriter() {
+        return productRankCalculationWriter;
     }
 
     /**
