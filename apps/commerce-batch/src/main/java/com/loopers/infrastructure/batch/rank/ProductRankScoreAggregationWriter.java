@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -80,25 +82,31 @@ public class ProductRankScoreAggregationWriter implements ItemWriter<ProductMetr
                 )
             ));
 
+        // Chunk 내 모든 productId를 한 번에 조회
+        Set<Long> productIds = chunkAggregatedMap.keySet();
+        Map<Long, ProductRankScore> existingScores = productRankScoreRepository
+            .findAllByProductIdIn(productIds)
+            .stream()
+            .collect(Collectors.toMap(ProductRankScore::getProductId, Function.identity()));
+
         // 기존 데이터와 누적하여 ProductRankScore 생성
         List<ProductRankScore> scores = chunkAggregatedMap.entrySet().stream()
             .map(entry -> {
                 Long productId = entry.getKey();
                 AggregatedMetrics chunkAggregated = entry.getValue();
                 
-                // 기존 데이터 조회
-                java.util.Optional<ProductRankScore> existing = productRankScoreRepository.findByProductId(productId);
+                // 기존 데이터 조회 (일괄 조회 결과에서)
+                ProductRankScore existing = existingScores.get(productId);
                 
                 // 기존 데이터와 누적
                 Long totalLikeCount = chunkAggregated.getLikeCount();
                 Long totalSalesCount = chunkAggregated.getSalesCount();
                 Long totalViewCount = chunkAggregated.getViewCount();
                 
-                if (existing.isPresent()) {
-                    ProductRankScore existingScore = existing.get();
-                    totalLikeCount += existingScore.getLikeCount();
-                    totalSalesCount += existingScore.getSalesCount();
-                    totalViewCount += existingScore.getViewCount();
+                if (existing != null) {
+                    totalLikeCount += existing.getLikeCount();
+                    totalSalesCount += existing.getSalesCount();
+                    totalViewCount += existing.getViewCount();
                 }
                 
                 // 점수 계산 (가중치: 좋아요 0.3, 판매량 0.5, 조회수 0.2)

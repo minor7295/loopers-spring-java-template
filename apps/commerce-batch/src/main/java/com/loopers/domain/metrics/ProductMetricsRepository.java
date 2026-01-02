@@ -54,9 +54,18 @@ public interface ProductMetricsRepository {
      * Spring Batch의 JpaPagingItemReader에서 사용됩니다.
      * updated_at 필드를 기준으로 해당 날짜의 데이터만 조회합니다.
      * </p>
+     * <p>
+     * <b>주의:</b> 쿼리는 {@code updatedAt >= :startDateTime AND updatedAt < :endDateTime} 조건을 사용하므로,
+     * endDateTime은 exclusive end입니다. 예를 들어, 2024-12-15의 데이터를 조회하려면:
+     * <ul>
+     *   <li>startDateTime: 2024-12-15 00:00:00</li>
+     *   <li>endDateTime: 2024-12-16 00:00:00 (다음 날 00:00:00)</li>
+     * </ul>
+     * 또는 {@code date.atTime(LocalTime.MAX)}를 사용할 수도 있습니다.
+     * </p>
      *
-     * @param startDateTime 조회 시작 시각 (해당 날짜의 00:00:00)
-     * @param endDateTime 조회 종료 시각 (해당 날짜의 23:59:59.999999999)
+     * @param startDateTime 조회 시작 시각 (해당 날짜의 00:00:00, inclusive)
+     * @param endDateTime 조회 종료 시각 (다음 날 00:00:00 또는 해당 날짜의 23:59:59.999999999, exclusive)
      * @param pageable 페이징 정보
      * @return 조회된 메트릭 페이지
      */
@@ -80,7 +89,6 @@ public interface ProductMetricsRepository {
      *
      * @return PagingAndSortingRepository를 구현한 JPA Repository
      */
-    @SuppressWarnings("rawtypes")
     org.springframework.data.repository.PagingAndSortingRepository<ProductMetrics, Long> getJpaRepository();
 }
 

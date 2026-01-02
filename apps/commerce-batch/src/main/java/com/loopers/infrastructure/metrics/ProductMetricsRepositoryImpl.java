@@ -65,7 +65,6 @@ public class ProductMetricsRepositoryImpl implements ProductMetricsRepository {
      * {@inheritDoc}
      */
     @Override
-    @SuppressWarnings("rawtypes")
     public org.springframework.data.repository.PagingAndSortingRepository<ProductMetrics, Long> getJpaRepository() {
         return productMetricsJpaRepository;
     }

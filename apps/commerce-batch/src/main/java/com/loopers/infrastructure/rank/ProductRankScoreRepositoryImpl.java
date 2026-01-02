@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * ProductRankScore Repository 구현체.
@@ -68,6 +69,18 @@ public class ProductRankScoreRepositoryImpl implements ProductRankScoreRepositor
         } catch (jakarta.persistence.NoResultException e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<ProductRankScore> findAllByProductIdIn(Set<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return List.of();
+        }
+        
+        String jpql = "SELECT prs FROM ProductRankScore prs WHERE prs.productId IN :productIds";
+        return entityManager.createQuery(jpql, ProductRankScore.class)
+            .setParameter("productIds", productIds)
+            .getResultList();
     }
 
     @Override

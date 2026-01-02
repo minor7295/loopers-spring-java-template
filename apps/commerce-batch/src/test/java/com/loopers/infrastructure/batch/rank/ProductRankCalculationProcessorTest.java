@@ -89,9 +89,9 @@ class ProductRankCalculationProcessorTest {
         assertThat(result.getViewCount()).isEqualTo(5L);
     }
 
-    @DisplayName("100번째 처리 후 ThreadLocal이 정리된다")
+    @DisplayName("101번째 이후는 null을 반환한다 (TOP 100 초과)")
     @Test
-    void cleansUpThreadLocalAfter100th() throws Exception {
+    void returnsNullAfter100th() throws Exception {
         // arrange
         ProductRank.PeriodType periodType = ProductRank.PeriodType.WEEKLY;
         LocalDate periodStartDate = LocalDate.of(2024, 12, 9);
@@ -99,33 +99,20 @@ class ProductRankCalculationProcessorTest {
         when(productRankAggregationProcessor.getPeriodType()).thenReturn(periodType);
         when(productRankAggregationProcessor.getPeriodStartDate()).thenReturn(periodStartDate);
 
-        // 99개까지 처리
-        for (int i = 1; i <= 99; i++) {
+        // 100개까지 처리
+        for (int i = 1; i <= 100; i++) {
             ProductRankScore score = createProductRankScore((long) i, 10L, 20L, 5L);
             ProductRank result = processor.process(score);
             assertThat(result).isNotNull();
             assertThat(result.getRank()).isEqualTo(i);
         }
 
-        // 100번째 처리 (이 시점에서 rank=100이 되고, rank == TOP_RANK_LIMIT이므로 remove() 호출됨)
-        ProductRankScore score100 = createProductRankScore(100L, 10L, 20L, 5L);
-        ProductRank rank100 = processor.process(score100);
-        
-        // assert
-        assertThat(rank100).isNotNull();
-        assertThat(rank100.getRank()).isEqualTo(100);
-        
-        // 100번째 처리 후 remove()가 호출되어 ThreadLocal이 정리됨
-        // 실제 배치에서는 100번째 이후는 처리되지 않으므로,
-        // 101번째를 처리하면 currentRank가 0으로 초기화되어 rank=1이 됨
-        // 이는 실제 배치 동작과는 다르지만, ThreadLocal 정리 동작을 검증하기 위한 테스트
+        // 101번째 처리 (rank > TOP_RANK_LIMIT이므로 null 반환)
         ProductRankScore score101 = createProductRankScore(101L, 10L, 20L, 5L);
         ProductRank result = processor.process(score101);
         
-        // remove() 후이므로 currentRank가 0으로 초기화되어 rank=1이 되고,
-        // rank <= 100이므로 ProductRank가 반환됨
-        assertThat(result).isNotNull();
-        assertThat(result.getRank()).isEqualTo(1); // remove() 후 다시 1부터 시작
+        // assert
+        assertThat(result).isNull(); // TOP 100 초과이므로 null 반환
     }
 
     @DisplayName("정확히 100번째는 ProductRank를 반환한다")

@@ -50,6 +50,24 @@ public class ProductRankAggregationReader {
      * @return RepositoryItemReader 인스턴스
      */
     public RepositoryItemReader<ProductMetrics> createWeeklyReader(LocalDate targetDate) {
+        DateRange weekRange = calculateWeeklyRange(targetDate);
+        
+        log.info("ProductRank 주간 Reader 초기화: targetDate={}, weekStart={}, weekEnd={}",
+            targetDate, weekRange.startDate(), weekRange.endDate());
+
+        return createReader(weekRange.startDateTime(), weekRange.endDateTime(), "weeklyReader");
+    }
+
+    /**
+     * 주간 범위를 계산합니다.
+     * <p>
+     * 테스트 가능성을 위해 별도 메서드로 분리했습니다.
+     * </p>
+     *
+     * @param targetDate 기준 날짜 (해당 주의 어느 날짜든 가능)
+     * @return 주간 범위 (시작일, 종료일)
+     */
+    DateRange calculateWeeklyRange(LocalDate targetDate) {
         // 주간 시작일 계산 (월요일)
         LocalDate weekStart = targetDate.with(java.time.DayOfWeek.MONDAY);
         LocalDateTime startDateTime = weekStart.atStartOfDay();
@@ -57,11 +75,8 @@ public class ProductRankAggregationReader {
         // 주간 종료일 계산 (다음 주 월요일 00:00:00)
         LocalDate weekEnd = weekStart.plusWeeks(1);
         LocalDateTime endDateTime = weekEnd.atStartOfDay();
-
-        log.info("ProductRank 주간 Reader 초기화: targetDate={}, weekStart={}, weekEnd={}",
-            targetDate, weekStart, weekEnd);
-
-        return createReader(startDateTime, endDateTime, "weeklyReader");
+        
+        return new DateRange(weekStart, weekEnd, startDateTime, endDateTime);
     }
 
     /**
@@ -74,6 +89,24 @@ public class ProductRankAggregationReader {
      * @return RepositoryItemReader 인스턴스
      */
     public RepositoryItemReader<ProductMetrics> createMonthlyReader(LocalDate targetDate) {
+        DateRange monthRange = calculateMonthlyRange(targetDate);
+        
+        log.info("ProductRank 월간 Reader 초기화: targetDate={}, monthStart={}, monthEnd={}",
+            targetDate, monthRange.startDate(), monthRange.endDate());
+
+        return createReader(monthRange.startDateTime(), monthRange.endDateTime(), "monthlyReader");
+    }
+
+    /**
+     * 월간 범위를 계산합니다.
+     * <p>
+     * 테스트 가능성을 위해 별도 메서드로 분리했습니다.
+     * </p>
+     *
+     * @param targetDate 기준 날짜 (해당 월의 어느 날짜든 가능)
+     * @return 월간 범위 (시작일, 종료일)
+     */
+    DateRange calculateMonthlyRange(LocalDate targetDate) {
         // 월간 시작일 계산 (1일)
         LocalDate monthStart = targetDate.with(TemporalAdjusters.firstDayOfMonth());
         LocalDateTime startDateTime = monthStart.atStartOfDay();
@@ -81,11 +114,8 @@ public class ProductRankAggregationReader {
         // 월간 종료일 계산 (다음 달 1일 00:00:00)
         LocalDate monthEnd = targetDate.with(TemporalAdjusters.firstDayOfNextMonth());
         LocalDateTime endDateTime = monthEnd.atStartOfDay();
-
-        log.info("ProductRank 월간 Reader 초기화: targetDate={}, monthStart={}, monthEnd={}",
-            targetDate, monthStart, monthEnd);
-
-        return createReader(startDateTime, endDateTime, "monthlyReader");
+        
+        return new DateRange(monthStart, monthEnd, startDateTime, endDateTime);
     }
 
     /**
@@ -118,6 +148,25 @@ public class ProductRankAggregationReader {
             .pageSize(100) // Chunk 크기와 동일하게 설정
             .sorts(sorts)
             .build();
+    }
+
+    /**
+     * 날짜 범위를 담는 레코드.
+     * <p>
+     * 테스트 가능성을 위해 내부 클래스로 정의했습니다.
+     * </p>
+     *
+     * @param startDate 시작일
+     * @param endDate 종료일 (exclusive)
+     * @param startDateTime 시작 시각
+     * @param endDateTime 종료 시각 (exclusive)
+     */
+    record DateRange(
+        LocalDate startDate,
+        LocalDate endDate,
+        LocalDateTime startDateTime,
+        LocalDateTime endDateTime
+    ) {
     }
 }
 

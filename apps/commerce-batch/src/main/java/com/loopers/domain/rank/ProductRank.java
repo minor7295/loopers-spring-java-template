@@ -16,8 +16,9 @@ import java.time.LocalDateTime;
  * <p>
  * <b>Materialized View 설계:</b>
  * <ul>
- *   <li>주간 랭킹: `mv_product_rank_weekly` (period_type = WEEKLY)</li>
- *   <li>월간 랭킹: `mv_product_rank_monthly` (period_type = MONTHLY)</li>
+ *   <li>테이블: `mv_product_rank` (단일 테이블)</li>
+ *   <li>주간 랭킹: period_type = WEEKLY</li>
+ *   <li>월간 랭킹: period_type = MONTHLY</li>
  *   <li>TOP 100만 저장하여 조회 성능 최적화</li>
  * </ul>
  * </p>

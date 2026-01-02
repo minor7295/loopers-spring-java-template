@@ -4,6 +4,7 @@ import com.loopers.domain.rank.ProductRankScore;
 import com.loopers.domain.rank.ProductRankScoreRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.NonTransientResourceException;
 import org.springframework.batch.item.ParseException;
@@ -33,6 +34,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@StepScope
 @RequiredArgsConstructor
 public class ProductRankCalculationReader implements ItemReader<ProductRankScore> {
 

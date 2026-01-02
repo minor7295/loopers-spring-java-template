@@ -14,11 +14,11 @@ import org.springframework.batch.item.Chunk;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.Mockito.*;
 
 /**
@@ -59,7 +59,7 @@ class ProductRankScoreAggregationWriterTest {
         
         Chunk<ProductMetrics> chunk = new Chunk<>(items);
         
-        when(productRankScoreRepository.findByProductId(anyLong())).thenReturn(Optional.empty());
+        when(productRankScoreRepository.findAllByProductIdIn(anySet())).thenReturn(List.of());
         doNothing().when(productRankScoreRepository).saveAll(anyList());
 
         // act
@@ -106,7 +106,7 @@ class ProductRankScoreAggregationWriterTest {
         
         Chunk<ProductMetrics> chunk = new Chunk<>(items);
         
-        when(productRankScoreRepository.findByProductId(anyLong())).thenReturn(Optional.empty());
+        when(productRankScoreRepository.findAllByProductIdIn(anySet())).thenReturn(List.of());
         doNothing().when(productRankScoreRepository).saveAll(anyList());
 
         // act
@@ -138,7 +138,7 @@ class ProductRankScoreAggregationWriterTest {
         
         // 기존 데이터: 좋아요 5, 판매량 20, 조회수 3
         ProductRankScore existingScore = new ProductRankScore(1L, 5L, 20L, 3L, 12.1);
-        when(productRankScoreRepository.findByProductId(1L)).thenReturn(Optional.of(existingScore));
+        when(productRankScoreRepository.findAllByProductIdIn(anySet())).thenReturn(List.of(existingScore));
         doNothing().when(productRankScoreRepository).saveAll(anyList());
 
         // act
@@ -168,7 +168,7 @@ class ProductRankScoreAggregationWriterTest {
         writer.write(chunk);
 
         // assert
-        verify(productRankScoreRepository, never()).findByProductId(anyLong());
+        verify(productRankScoreRepository, never()).findAllByProductIdIn(anySet());
         verify(productRankScoreRepository, never()).saveAll(anyList());
     }
 
@@ -188,7 +188,7 @@ class ProductRankScoreAggregationWriterTest {
         
         Chunk<ProductMetrics> chunk = new Chunk<>(items);
         
-        when(productRankScoreRepository.findByProductId(anyLong())).thenReturn(Optional.empty());
+        when(productRankScoreRepository.findAllByProductIdIn(anySet())).thenReturn(List.of());
         doNothing().when(productRankScoreRepository).saveAll(anyList());
 
         // act
@@ -230,7 +230,7 @@ class ProductRankScoreAggregationWriterTest {
         
         Chunk<ProductMetrics> chunk = new Chunk<>(items);
         
-        when(productRankScoreRepository.findByProductId(1L)).thenReturn(Optional.empty());
+        when(productRankScoreRepository.findAllByProductIdIn(anySet())).thenReturn(List.of());
         doNothing().when(productRankScoreRepository).saveAll(anyList());
 
         // act

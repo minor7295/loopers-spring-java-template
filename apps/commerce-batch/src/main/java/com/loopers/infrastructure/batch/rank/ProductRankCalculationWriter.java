@@ -4,6 +4,7 @@ import com.loopers.domain.rank.ProductRank;
 import com.loopers.domain.rank.ProductRankRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.Chunk;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
+@StepScope
 @RequiredArgsConstructor
 public class ProductRankCalculationWriter implements ItemWriter<ProductRank> {
 

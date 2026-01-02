@@ -417,8 +417,10 @@ public class RankingService {
         Map<Long, Brand> brandMap = brandService.getBrands(brandIds).stream()
             .collect(Collectors.toMap(Brand::getId, brand -> brand));
 
-        // 랭킹 항목 생성
+        // 랭킹 항목 생성 (순위 재계산: 누락된 항목 제외 후 연속 순위 부여)
         List<RankingItem> rankingItems = new ArrayList<>();
+        long currentRank = start + 1; // 1-based 순위 (페이지 시작 순위)
+        
         for (com.loopers.domain.rank.ProductRank rank : pagedRanks) {
             Long productId = rank.getProductId();
             Product product = productMap.get(productId);
@@ -445,7 +447,7 @@ public class RankingService {
             double score = calculateScore(rank.getLikeCount(), rank.getSalesCount(), rank.getViewCount());
 
             rankingItems.add(new RankingItem(
-                rank.getRank().longValue(),
+                currentRank++, // 연속 순위 부여
                 score,
                 productDetail
             ));

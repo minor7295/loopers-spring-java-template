@@ -4,6 +4,7 @@ import com.loopers.domain.rank.ProductRank;
 import com.loopers.domain.rank.ProductRankScore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.stereotype.Component;
 
@@ -29,11 +30,12 @@ import java.time.LocalDate;
  */
 @Slf4j
 @Component
+@StepScope
 @RequiredArgsConstructor
 public class ProductRankCalculationProcessor implements ItemProcessor<ProductRankScore, ProductRank> {
 
     private final ProductRankAggregationProcessor productRankAggregationProcessor;
-    private final ThreadLocal<Integer> currentRank = ThreadLocal.withInitial(() -> 0);
+    private int currentRank = 0;
     private static final int TOP_RANK_LIMIT = 100;
 
     /**
@@ -48,8 +50,7 @@ public class ProductRankCalculationProcessor implements ItemProcessor<ProductRan
      */
     @Override
     public ProductRank process(ProductRankScore score) throws Exception {
-        int rank = currentRank.get() + 1;
-        currentRank.set(rank);
+        int rank = ++currentRank;
 
         // TOP 100에 포함되지 않으면 null 반환 (필터링)
         if (rank > TOP_RANK_LIMIT) {
@@ -75,11 +76,6 @@ public class ProductRankCalculationProcessor implements ItemProcessor<ProductRan
             score.getSalesCount(),
             score.getViewCount()
         );
-
-        // Step 완료 후 ThreadLocal 정리 (마지막 항목 처리 시)
-        if (rank == TOP_RANK_LIMIT) {
-            currentRank.remove();
-        }
 
         return productRank;
     }

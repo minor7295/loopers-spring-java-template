@@ -49,17 +49,18 @@ class ProductRankAggregationReaderTest {
     void weeklyReaderQueriesFromMondayToNextMonday() {
         // arrange
         LocalDate targetDate = LocalDate.of(2024, 12, 15); // 일요일
-        when(productMetricsRepository.getJpaRepository()).thenReturn(jpaRepository);
         
         ProductRankAggregationReader reader = new ProductRankAggregationReader(productMetricsRepository);
 
         // act
-        RepositoryItemReader<ProductMetrics> itemReader = reader.createWeeklyReader(targetDate);
+        ProductRankAggregationReader.DateRange range = reader.calculateWeeklyRange(targetDate);
 
         // assert
-        assertThat(itemReader).isNotNull();
-        // 주간 시작일은 해당 주의 월요일이어야 함
         // 2024-12-15(일) -> 2024-12-09(월)이 시작일
+        assertThat(range.startDate()).isEqualTo(LocalDate.of(2024, 12, 9)); // 월요일
+        assertThat(range.endDate()).isEqualTo(LocalDate.of(2024, 12, 16)); // 다음 주 월요일
+        assertThat(range.startDateTime()).isEqualTo(LocalDate.of(2024, 12, 9).atStartOfDay());
+        assertThat(range.endDateTime()).isEqualTo(LocalDate.of(2024, 12, 16).atStartOfDay());
     }
 
     @DisplayName("월간 Reader를 생성할 수 있다")
@@ -84,24 +85,24 @@ class ProductRankAggregationReaderTest {
     void monthlyReaderQueriesFromFirstDayToNextMonth() {
         // arrange
         LocalDate targetDate = LocalDate.of(2024, 12, 15);
-        when(productMetricsRepository.getJpaRepository()).thenReturn(jpaRepository);
         
         ProductRankAggregationReader reader = new ProductRankAggregationReader(productMetricsRepository);
 
         // act
-        RepositoryItemReader<ProductMetrics> itemReader = reader.createMonthlyReader(targetDate);
+        ProductRankAggregationReader.DateRange range = reader.calculateMonthlyRange(targetDate);
 
         // assert
-        assertThat(itemReader).isNotNull();
-        // 월간 시작일은 해당 월의 1일이어야 함
         // 2024-12-15 -> 2024-12-01이 시작일
+        assertThat(range.startDate()).isEqualTo(LocalDate.of(2024, 12, 1)); // 1일
+        assertThat(range.endDate()).isEqualTo(LocalDate.of(2025, 1, 1)); // 다음 달 1일
+        assertThat(range.startDateTime()).isEqualTo(LocalDate.of(2024, 12, 1).atStartOfDay());
+        assertThat(range.endDateTime()).isEqualTo(LocalDate.of(2025, 1, 1).atStartOfDay());
     }
 
     @DisplayName("주간 Reader는 주의 어느 날짜든 올바른 주간 범위를 계산한다")
     @Test
     void weeklyReaderCalculatesCorrectWeekRange_forAnyDayInWeek() {
         // arrange
-        when(productMetricsRepository.getJpaRepository()).thenReturn(jpaRepository);
         ProductRankAggregationReader reader = new ProductRankAggregationReader(productMetricsRepository);
 
         // 월요일
@@ -112,22 +113,29 @@ class ProductRankAggregationReaderTest {
         LocalDate sunday = LocalDate.of(2024, 12, 15);
 
         // act
-        RepositoryItemReader<ProductMetrics> mondayReader = reader.createWeeklyReader(monday);
-        RepositoryItemReader<ProductMetrics> wednesdayReader = reader.createWeeklyReader(wednesday);
-        RepositoryItemReader<ProductMetrics> sundayReader = reader.createWeeklyReader(sunday);
+        ProductRankAggregationReader.DateRange mondayRange = reader.calculateWeeklyRange(monday);
+        ProductRankAggregationReader.DateRange wednesdayRange = reader.calculateWeeklyRange(wednesday);
+        ProductRankAggregationReader.DateRange sundayRange = reader.calculateWeeklyRange(sunday);
 
         // assert
-        assertThat(mondayReader).isNotNull();
-        assertThat(wednesdayReader).isNotNull();
-        assertThat(sundayReader).isNotNull();
         // 모두 같은 주의 월요일부터 시작해야 함
+        LocalDate expectedStart = LocalDate.of(2024, 12, 9); // 월요일
+        LocalDate expectedEnd = LocalDate.of(2024, 12, 16); // 다음 주 월요일
+        
+        assertThat(mondayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(mondayRange.endDate()).isEqualTo(expectedEnd);
+        
+        assertThat(wednesdayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(wednesdayRange.endDate()).isEqualTo(expectedEnd);
+        
+        assertThat(sundayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(sundayRange.endDate()).isEqualTo(expectedEnd);
     }
 
     @DisplayName("월간 Reader는 월의 어느 날짜든 올바른 월간 범위를 계산한다")
     @Test
     void monthlyReaderCalculatesCorrectMonthRange_forAnyDayInMonth() {
         // arrange
-        when(productMetricsRepository.getJpaRepository()).thenReturn(jpaRepository);
         ProductRankAggregationReader reader = new ProductRankAggregationReader(productMetricsRepository);
 
         // 1일
@@ -138,15 +146,23 @@ class ProductRankAggregationReaderTest {
         LocalDate lastDay = LocalDate.of(2024, 12, 31);
 
         // act
-        RepositoryItemReader<ProductMetrics> firstDayReader = reader.createMonthlyReader(firstDay);
-        RepositoryItemReader<ProductMetrics> midDayReader = reader.createMonthlyReader(midDay);
-        RepositoryItemReader<ProductMetrics> lastDayReader = reader.createMonthlyReader(lastDay);
+        ProductRankAggregationReader.DateRange firstDayRange = reader.calculateMonthlyRange(firstDay);
+        ProductRankAggregationReader.DateRange midDayRange = reader.calculateMonthlyRange(midDay);
+        ProductRankAggregationReader.DateRange lastDayRange = reader.calculateMonthlyRange(lastDay);
 
         // assert
-        assertThat(firstDayReader).isNotNull();
-        assertThat(midDayReader).isNotNull();
-        assertThat(lastDayReader).isNotNull();
         // 모두 같은 월의 1일부터 시작해야 함
+        LocalDate expectedStart = LocalDate.of(2024, 12, 1); // 1일
+        LocalDate expectedEnd = LocalDate.of(2025, 1, 1); // 다음 달 1일
+        
+        assertThat(firstDayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(firstDayRange.endDate()).isEqualTo(expectedEnd);
+        
+        assertThat(midDayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(midDayRange.endDate()).isEqualTo(expectedEnd);
+        
+        assertThat(lastDayRange.startDate()).isEqualTo(expectedStart);
+        assertThat(lastDayRange.endDate()).isEqualTo(expectedEnd);
     }
 }
 

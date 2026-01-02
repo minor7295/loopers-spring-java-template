@@ -181,6 +181,10 @@ public class ProductRankJobConfig {
         @Value("#{jobParameters['periodType']}") String periodType,
         @Value("#{jobParameters['targetDate']}") String targetDate
     ) {
+        if (periodType == null || periodType.isEmpty()) {
+            throw new IllegalArgumentException("periodType 파라미터는 필수입니다. (WEEKLY 또는 MONTHLY)");
+        }
+
         LocalDate date = parseDate(targetDate);
         ProductRank.PeriodType period = ProductRank.PeriodType.valueOf(periodType.toUpperCase());
 

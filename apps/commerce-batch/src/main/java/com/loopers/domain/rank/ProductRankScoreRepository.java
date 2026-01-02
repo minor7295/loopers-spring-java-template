@@ -2,6 +2,7 @@ package com.loopers.domain.rank;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * ProductRankScore 도메인 Repository 인터페이스.
@@ -38,6 +39,17 @@ public interface ProductRankScoreRepository {
      * @return ProductRankScore (없으면 Optional.empty())
      */
     Optional<ProductRankScore> findByProductId(Long productId);
+
+    /**
+     * 여러 product_id로 ProductRankScore를 일괄 조회합니다.
+     * <p>
+     * N+1 쿼리 문제를 방지하기 위해 사용합니다.
+     * </p>
+     *
+     * @param productIds 상품 ID 집합
+     * @return ProductRankScore 리스트
+     */
+    List<ProductRankScore> findAllByProductIdIn(Set<Long> productIds);
 
     /**
      * 모든 ProductRankScore를 점수 내림차순으로 조회합니다.

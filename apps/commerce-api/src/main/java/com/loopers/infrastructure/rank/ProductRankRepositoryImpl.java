@@ -6,6 +6,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.Optional;
  */
 @Slf4j
 @Repository
+@Transactional(readOnly = true)
 public class ProductRankRepositoryImpl implements ProductRankRepository {
 
     @PersistenceContext
