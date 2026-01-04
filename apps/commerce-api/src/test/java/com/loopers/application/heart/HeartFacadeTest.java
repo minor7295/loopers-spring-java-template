@@ -1,0 +1,266 @@
+package com.loopers.application.heart;
+
+import com.loopers.application.like.LikeService;
+import com.loopers.application.product.ProductService;
+import com.loopers.application.user.UserService;
+import com.loopers.domain.like.Like;
+import com.loopers.domain.product.Product;
+import com.loopers.domain.user.User;
+import com.loopers.support.error.CoreException;
+import com.loopers.support.error.ErrorType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+
+@DisplayName("HeartFacade 좋아요 등록/취소/중복 방지 흐름 검증")
+class HeartFacadeTest {
+
+    @Mock
+    private LikeService likeService;
+    
+    @Mock
+    private UserService userService;
+    
+    @Mock
+    private ProductService productService; // 조회용으로만 사용
+
+    @InjectMocks
+    private HeartFacade heartFacade;
+
+    private static final String DEFAULT_USER_ID = "testuser";
+    private static final Long DEFAULT_USER_INTERNAL_ID = 1L;
+    private static final Long DEFAULT_PRODUCT_ID = 1L;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    @DisplayName("좋아요를 등록할 수 있다")
+    void addLike_success() {
+        // arrange
+        setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+            .thenReturn(Optional.empty());
+
+        // act
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+
+        // assert
+        // ✅ EDA 원칙: LikeService.save()가 LikeEvent.LikeAdded 이벤트를 발행
+        // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
+        verify(likeService).save(any(Like.class));
+        // ProductService는 조회용으로만 사용되므로 검증하지 않음
+    }
+
+    @Test
+    @DisplayName("좋아요를 취소할 수 있다")
+    void removeLike_success() {
+        // arrange
+        setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        Like like = Like.of(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+            .thenReturn(Optional.of(like));
+
+        // act
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+
+        // assert
+        // ✅ EDA 원칙: LikeService.delete()가 LikeEvent.LikeRemoved 이벤트를 발행
+        // ✅ ProductEventHandler가 이벤트를 구독하여 상품 좋아요 수 및 캐시 업데이트
+        verify(likeService).delete(like);
+    }
+
+    @Test
+    @DisplayName("좋아요는 중복 등록되지 않는다.")
+    void addLike_isIdempotent() {
+        // arrange
+        setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+            .thenReturn(Optional.of(Like.of(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID)));
+
+        // act
+        heartFacade.addLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+
+        // assert - save는 한 번만 호출되어야 함 (중복 방지)
+        verify(likeService, never()).save(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("좋아요는 중복 취소되지 않는다.")
+    void removeLike_isIdempotent() {
+        // arrange
+        setupMocks(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID))
+            .thenReturn(Optional.empty()); // 좋아요 없음
+
+        // act - 좋아요가 없는 상태에서 취소 시도
+        heartFacade.removeLike(DEFAULT_USER_ID, DEFAULT_PRODUCT_ID);
+
+        // assert - 예외가 발생하지 않아야 함 (멱등성 보장)
+        verify(likeService).getLike(DEFAULT_USER_INTERNAL_ID, DEFAULT_PRODUCT_ID);
+        verify(likeService, never()).delete(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("사용자를 찾을 수 없으면 예외를 던진다")
+    void addLike_userNotFound() {
+        // arrange
+        String unknownUserId = "unknown";
+        when(userService.getUser(unknownUserId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+
+        // act & assert
+        assertThatThrownBy(() -> heartFacade.addLike(unknownUserId, DEFAULT_PRODUCT_ID))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("좋아요 등록 시 상품 존재 여부 검증은 제거됨 (이벤트 핸들러에서 처리)")
+    void addLike_productValidationRemoved() {
+        // arrange
+        setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
+        Long productId = 999L;
+        // ✅ EDA 원칙: Product 존재 여부 검증은 제거됨
+        // 이벤트 핸들러에서 처리하거나 외래키 제약조건으로 보장
+        when(likeService.getLike(DEFAULT_USER_INTERNAL_ID, productId))
+            .thenReturn(Optional.empty());
+
+        // act
+        heartFacade.addLike(DEFAULT_USER_ID, productId);
+
+        // assert
+        // ProductService.getProduct()는 호출되지 않음 (검증 제거됨)
+        verify(productService, never()).getProduct(any());
+        verify(likeService).save(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("좋아요한 상품 목록을 조회할 수 있다")
+    void getLikedProducts_success() {
+        // arrange
+        setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
+        
+        Long productId1 = 1L;
+        Long productId2 = 2L;
+        
+        Like like1 = Like.of(DEFAULT_USER_INTERNAL_ID, productId1);
+        Like like2 = Like.of(DEFAULT_USER_INTERNAL_ID, productId2);
+        List<Like> likes = List.of(like1, like2);
+        
+        // ✅ Product.likeCount 필드 사용 (비동기 집계된 값)
+        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
+        Product product2 = createMockProduct(productId2, "상품2", 20000, 20, 1L, 3L);
+        
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
+        when(productService.getProducts(List.of(productId1, productId2)))
+            .thenReturn(List.of(product1, product2));
+        
+        // act
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
+        
+        // assert
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(HeartFacade.LikedProduct::productId)
+            .containsExactlyInAnyOrder(productId1, productId2);
+        assertThat(result).extracting(HeartFacade.LikedProduct::likesCount)
+            .containsExactlyInAnyOrder(5L, 3L);
+    }
+
+    @Test
+    @DisplayName("좋아요한 상품이 없으면 빈 목록을 반환한다")
+    void getLikedProducts_emptyList() {
+        // arrange
+        setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(List.of());
+        
+        // act
+        List<HeartFacade.LikedProduct> result = heartFacade.getLikedProducts(DEFAULT_USER_ID);
+        
+        // assert
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("좋아요한 상품 목록 조회 시 상품을 찾을 수 없으면 예외를 던진다")
+    void getLikedProducts_productNotFound() {
+        // arrange
+        setupMockUser(DEFAULT_USER_ID, DEFAULT_USER_INTERNAL_ID);
+        
+        Long productId1 = 1L;
+        Long nonExistentProductId = 999L;
+        
+        Like like1 = Like.of(DEFAULT_USER_INTERNAL_ID, productId1);
+        Like like2 = Like.of(DEFAULT_USER_INTERNAL_ID, nonExistentProductId);
+        List<Like> likes = List.of(like1, like2);
+        
+        Product product1 = createMockProduct(productId1, "상품1", 10000, 10, 1L, 5L);
+        
+        when(likeService.getLikesByUserId(DEFAULT_USER_INTERNAL_ID)).thenReturn(likes);
+        // nonExistentProductId가 포함되지 않아서 예외가 발생해야 함
+        when(productService.getProducts(List.of(productId1, nonExistentProductId)))
+            .thenReturn(List.of(product1)); // product1만 반환 (nonExistentProductId는 없음)
+        
+        // act & assert
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(DEFAULT_USER_ID))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("좋아요한 상품 목록 조회 시 사용자를 찾을 수 없으면 예외를 던진다")
+    void getLikedProducts_userNotFound() {
+        // arrange
+        String unknownUserId = "unknown";
+        when(userService.getUser(unknownUserId))
+            .thenThrow(new CoreException(ErrorType.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        
+        // act & assert
+        assertThatThrownBy(() -> heartFacade.getLikedProducts(unknownUserId))
+            .isInstanceOf(CoreException.class)
+            .hasFieldOrPropertyWithValue("errorType", ErrorType.NOT_FOUND);
+    }
+
+    // Helper methods for test setup
+
+    private void setupMocks(String userId, Long userInternalId, Long productId) {
+        setupMockUser(userId, userInternalId);
+        // ✅ EDA 원칙: ProductService는 조회용으로만 사용되므로 mock 설정 불필요
+        // Product 존재 여부 검증은 제거됨
+    }
+
+    private void setupMockUser(String userId, Long userInternalId) {
+        User mockUser = mock(User.class);
+        when(mockUser.getId()).thenReturn(userInternalId);
+        when(userService.getUser(userId)).thenReturn(mockUser);
+    }
+
+    private Product createMockProduct(Long productId, String name, Integer price, Integer stock, Long brandId, Long likeCount) {
+        Product product = mock(Product.class);
+        when(product.getId()).thenReturn(productId);
+        when(product.getName()).thenReturn(name);
+        when(product.getPrice()).thenReturn(price);
+        when(product.getStock()).thenReturn(stock);
+        when(product.getBrandId()).thenReturn(brandId);
+        // ✅ Product.likeCount 필드 mock 설정 (비동기 집계된 값)
+        when(product.getLikeCount()).thenReturn(likeCount);
+        return product;
+    }
+}
+
